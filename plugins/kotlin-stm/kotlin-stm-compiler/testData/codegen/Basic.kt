@@ -50,6 +50,11 @@ fun g() {
     println(u.firstName)
 }
 
-//class KoUser(val firstName: String, val lastName: String) {
-//    fun ko() = 5
-//}
+@SharedMutable
+object SM {
+    var x: Int = 21
+}
+
+fun g2() {
+    SM.x = 42
+}
