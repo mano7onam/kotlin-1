@@ -113,12 +113,12 @@ private class StmCallLowering(
 }
 
 open class StmLoweringExtension : IrGenerationExtension {
+    val funTransformMap = FunctionTransformMap()
+
     override fun generate(
         moduleFragment: IrModuleFragment,
         pluginContext: IrPluginContext
     ) {
-        val funTransformMap = FunctionTransformMap()
-
         val stmFunctionLowering = StmAtomicFunctionLowering(pluginContext, funTransformMap)
         val stmClassLowering = StmSharedClassLowering(pluginContext)
         val stmCallLowering = StmCallLowering(pluginContext, funTransformMap)
