@@ -5,6 +5,7 @@
 
 package org.jetbrains.kotlinx.stm.compiler.extensions
 
+import org.jetbrains.kotlin.backend.common.descriptors.synthesizedName
 import org.jetbrains.kotlin.descriptors.*
 import org.jetbrains.kotlin.descriptors.annotations.Annotations
 import org.jetbrains.kotlin.descriptors.impl.SimpleFunctionDescriptorImpl
@@ -58,7 +59,7 @@ open class StmResolveExtension : SyntheticResolveExtension {
             type: KotlinType,
             visibility: Visibility,
             typeParameters: List<TypeParameterDescriptor> = listOf(),
-            valueParametersBuilder: MutableList<ValueParameterDescriptor>.(SimpleFunctionDescriptor) -> Unit
+            valueParametersBuilder: (SimpleFunctionDescriptor) -> List<ValueParameterDescriptor>
         ): SimpleFunctionDescriptor {
             val descriptor = SimpleFunctionDescriptorImpl.create(
                 containingDeclaration,
@@ -68,8 +69,7 @@ open class StmResolveExtension : SyntheticResolveExtension {
                 sourceElement
             )
 
-            val valueParameters = mutableListOf<ValueParameterDescriptor>()
-            valueParameters.valueParametersBuilder(descriptor)
+            val valueParameters = valueParametersBuilder(descriptor)
 
             descriptor.initialize(
                 extensionReceiverParameter,
@@ -126,7 +126,7 @@ open class StmResolveExtension : SyntheticResolveExtension {
                     if (nullable) it.makeNullableAsSpecified(true)
                     else it
                 },
-                name = "ctx",
+                name = "ctx".synthesizedName.identifier,
                 index = index
             )
     }
@@ -166,7 +166,7 @@ open class StmResolveExtension : SyntheticResolveExtension {
                 type = property.type,
                 visibility = property.visibility
             ) { newGetter ->
-                add(createContextValueParam(thisDescriptor.module, thisDescriptor.source, newGetter, index = 0, nullable = true))
+                listOf(createContextValueParam(thisDescriptor.module, thisDescriptor.source, newGetter, index = 0, nullable = true))
             }
 
             result += newGetter
@@ -180,8 +180,10 @@ open class StmResolveExtension : SyntheticResolveExtension {
                 type = thisDescriptor.module.builtIns.unitType,
                 visibility = property.visibility
             ) { newSetter ->
-                add(createContextValueParam(thisDescriptor.module, thisDescriptor.source, newSetter, index = 0, nullable = true))
-                add(createValueParam(thisDescriptor.source, newSetter, property.type, name = "newValue", index = 1))
+                listOf(
+                    createContextValueParam(thisDescriptor.module, thisDescriptor.source, newSetter, index = 0, nullable = true),
+                    createValueParam(thisDescriptor.source, newSetter, property.type, name = "newValue", index = 1)
+                )
             }
 
             result += newSetter

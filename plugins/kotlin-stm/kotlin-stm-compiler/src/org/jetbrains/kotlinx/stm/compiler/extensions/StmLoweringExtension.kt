@@ -21,24 +21,28 @@ import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
+import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
+import org.jetbrains.kotlin.ir.visitors.acceptVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlinx.stm.compiler.ATOMIC_FUNCTION_ANNOTATION
 import org.jetbrains.kotlinx.stm.compiler.SHARED_MUTABLE_ANNOTATION
 import org.jetbrains.kotlinx.stm.compiler.backend.ir.StmIrGenerator
 
+private fun IrFunction.isAtomicFunction() = this.annotations.hasAnnotation(ATOMIC_FUNCTION_ANNOTATION)
 private fun FunctionDescriptor.isAtomicFunction() = this.annotations.hasAnnotation(ATOMIC_FUNCTION_ANNOTATION)
 
+private fun IrClass.isSharedClass() = this.annotations.hasAnnotation(SHARED_MUTABLE_ANNOTATION)
 private fun ClassDescriptor.isSharedClass() = this.annotations.hasAnnotation(SHARED_MUTABLE_ANNOTATION)
 
-internal typealias FunctionTransformMap = HashMap<IrFunctionSymbol, IrFunction>
+internal typealias FunctionTransformMap = MutableMap<IrFunctionSymbol, IrFunction>
 
 private class StmSharedClassLowering(
     val pluginContext: IrPluginContext
 ) : IrElementTransformerVoid() {
 
     override fun visitClass(declaration: IrClass): IrStatement {
-        if (declaration.descriptor.isSharedClass())
+        if (declaration.isSharedClass())
             StmIrGenerator.patchSharedClass(
                 declaration,
                 pluginContext,
@@ -59,8 +63,8 @@ private class StmAtomicFunctionLowering(
     private val argumentMap = hashMapOf<IrValueSymbol, IrValueParameter>()
 
     override fun visitFunction(declaration: IrFunction): IrStatement {
-        val result = if (declaration.descriptor.isAtomicFunction())
-            StmIrGenerator.patchFunction(declaration, pluginContext, argumentMap).also {
+        val result = if (declaration.isAtomicFunction())
+            StmIrGenerator.patchFunction(declaration, pluginContext.symbolTable, argumentMap).also {
                 resultMap[declaration.symbol] = it
             }
         else
@@ -113,7 +117,7 @@ private class StmCallLowering(
 }
 
 open class StmLoweringExtension : IrGenerationExtension {
-    val funTransformMap = FunctionTransformMap()
+    val funTransformMap: FunctionTransformMap = mutableMapOf()
 
     override fun generate(
         moduleFragment: IrModuleFragment,

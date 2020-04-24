@@ -7,26 +7,27 @@ package org.jetbrains.kotlinx.stm.compiler.backend.ir
 
 import org.jetbrains.kotlin.backend.common.BackendContext
 import org.jetbrains.kotlin.backend.common.deepCopyWithVariables
+import org.jetbrains.kotlin.backend.common.descriptors.synthesizedName
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
+import org.jetbrains.kotlin.backend.common.ir.copyTo
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
 import org.jetbrains.kotlin.backend.common.lower.parents
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.descriptors.*
-import org.jetbrains.kotlin.descriptors.annotations.Annotations
-import org.jetbrains.kotlin.descriptors.impl.AnonymousFunctionDescriptor
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.*
-import org.jetbrains.kotlin.ir.builders.declarations.addField
-import org.jetbrains.kotlin.ir.builders.declarations.addTypeParameter
-import org.jetbrains.kotlin.ir.builders.declarations.buildField
+import org.jetbrains.kotlin.ir.builders.declarations.*
 import org.jetbrains.kotlin.ir.declarations.*
+import org.jetbrains.kotlin.ir.declarations.impl.IrFunctionImpl
 import org.jetbrains.kotlin.ir.declarations.impl.IrValueParameterImpl
 import org.jetbrains.kotlin.ir.descriptors.WrappedReceiverParameterDescriptor
+import org.jetbrains.kotlin.ir.descriptors.WrappedSimpleFunctionDescriptor
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.expressions.impl.*
 import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
 import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
+import org.jetbrains.kotlin.ir.symbols.impl.IrSimpleFunctionSymbolImpl
 import org.jetbrains.kotlin.ir.symbols.impl.IrValueParameterSymbolImpl
 import org.jetbrains.kotlin.ir.types.*
 import org.jetbrains.kotlin.ir.types.impl.IrSimpleTypeBuilder
@@ -226,53 +227,50 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
         runAtomically: IrFunctionSymbol,
         stmContextType: IrType
     ) {
-        var functionDescriptor = irFunction.descriptor
+        val functionDescriptor = irFunction.descriptor
 
         irClass.contributeFunction(functionDescriptor) {
-            val lambdaDescriptor = AnonymousFunctionDescriptor(
-                /*containingDeclaration = */ functionDescriptor,
-                /*annotations = */ Annotations.EMPTY,
-                /*kind = */ CallableMemberDescriptor.Kind.DECLARATION,
-                /*source = */ functionDescriptor.source,
-                /*isSuspend = */ functionDescriptor.isSuspend
-            )
 
             val ctxReceiverDescriptor = WrappedReceiverParameterDescriptor()
             val ctxReceiver = createReceiverParam(stmContextType, ctxReceiverDescriptor, "ctx", index = 0)
             ctxReceiverDescriptor.bind(ctxReceiver)
 
-            lambdaDescriptor.initialize(
-                /*extensionReceiver=*/ ctxReceiverDescriptor,
-                /*dispatchReceiver=*/ null,
-                /*typeParameters=*/ listOf(),
-                /*valueParameters=*/ listOf(),
-                /*returnType=*/ functionDescriptor.returnType,
-                /*modality=*/ functionDescriptor.modality,
-                /*visibility=*/ Visibilities.LOCAL
-            )
+            val funReturnType = irFunction.returnType
 
-            val irLambda = compilerContext.symbolTable.declareSimpleFunction(startOffset, endOffset, STM_PLUGIN_ORIGIN, lambdaDescriptor)
-            irLambda.body =
-                DeclarationIrBuilder(compilerContext, irLambda.symbol, irFunction.startOffset, irFunction.endOffset).irBlockBody(
+            val lambdaDescriptor = WrappedSimpleFunctionDescriptor()
+            val irLambda = IrFunctionImpl(
+                startOffset = UNDEFINED_OFFSET,
+                endOffset = UNDEFINED_OFFSET,
+                origin = STM_PLUGIN_ORIGIN,
+                symbol = IrSimpleFunctionSymbolImpl(lambdaDescriptor),
+                name = irFunction.name,
+                visibility = Visibilities.LOCAL,
+                modality = functionDescriptor.modality,
+                returnType = funReturnType,
+                isInline = irFunction.isInline,
+                isExternal = irFunction.isExternal,
+                isTailrec = irFunction.isTailrec,
+                isSuspend = irFunction.isSuspend,
+                isExpect = irFunction.isExpect,
+                isFakeOverride = false,
+                isOperator = false
+            ).apply {
+                lambdaDescriptor.bind(this)
+                parent = irFunction
+                extensionReceiverParameter = ctxReceiver
+                body = DeclarationIrBuilder(compilerContext, this.symbol, irFunction.startOffset, irFunction.endOffset).irBlockBody(
                     this.startOffset,
                     this.endOffset
                 ) {
-                    irFunction.body?.deepCopyWithSymbols(initialParent = irLambda)?.statements?.forEach { st ->
+                    irFunction.body?.deepCopyWithSymbols(initialParent = this@apply)?.statements?.forEach { st ->
                         when (st) {
                             is IrReturn -> +irReturn(st.value)
                             else -> +st
                         }
                     }
                 }
-
-            irLambda.extensionReceiverParameter = ctxReceiver
-
-            irLambda.returnType = irFunction.returnType
-
-            irLambda.patchDeclarationParents(irFunction)
-
-            val funReturnType = (functionDescriptor.returnType
-                ?: functionDescriptor.module.builtIns.unitType).toIrType()
+                patchDeclarationParents(this)
+            }
 
             val lambdaType = runAtomically.descriptor.valueParameters[1].type.replace(
                 listOf(
@@ -286,16 +284,6 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
                     )
                 )
             ).toIrType()
-//                IrSimpleTypeBuilder().run {
-//
-//                    classifier = . classifierOrFail
-//                            hasQuestionMark = funReturnType.isMarkedNullable()
-//
-//                    arguments = listOf(
-//                        makeTypeProjection(funReturnType, Variance.INVARIANT)
-//                    )
-//                    buildSimpleType()
-//                }
 
             val lambdaExpression = IrFunctionExpressionImpl(
                 irLambda.startOffset, irLambda.endOffset,
@@ -308,6 +296,13 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
 
             val functionStack = irFunction.parents.mapNotNull { it as? IrFunction }.toMutableList()
 
+            /* Note: this is needed for the case when we are transforming fake overrides.
+             Fake overrides must now be also a real defined functions,
+             example:
+             override fun toString(): String {
+                return runAtomically { super.toString() }
+             }
+             */
             it.origin = IrDeclarationOrigin.DEFINED
 
             +irReturn(
@@ -375,6 +370,11 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
         return delegateField
     }
 
+    private fun IrClass.findMethodDescriptor(name: Name) = this.declarations
+        .find { it.nameForIrSerialization == name }
+        ?.descriptor
+        ?.safeAs<FunctionDescriptor>()
+
     fun addGetFunction(
         irClass: IrClass,
         propertyName: Name,
@@ -383,11 +383,11 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
         getVar: IrFunctionSymbol
     ): IrFunction? {
         val getterFunDescriptor =
-            irClass.descriptor.findMethods(StmResolveExtension.getterName(propertyName)).firstOrNull()
+            irClass.findMethodDescriptor(StmResolveExtension.getterName(propertyName))
                 ?: return null
 
         return irClass.contributeFunction(getterFunDescriptor, declareNew = true) { f ->
-            val stmFieldExpr = irGetField(irGet(f.dispatchReceiverParameter!!), stmField) // TODO: koshka
+            val stmFieldExpr = irGetField(irGet(f.dispatchReceiverParameter!!), stmField)
 
             val stmContextParam = f.valueParameters[0]
 
@@ -400,7 +400,15 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
                     args = *arrayOf(irGet(stmContextParam), delegateFieldExpr),
                     typeHint = getterFunDescriptor.returnType?.toIrType()
                 ).apply {
-                    putTypeArgument(index = 0, type = delegateFieldExpr.type.safeAs<IrSimpleType>()?.arguments?.first()?.typeOrNull)
+                    putTypeArgument(
+                        index = 0,
+                        type = delegateFieldExpr.type
+                            .safeAs<IrSimpleType>()
+                            ?.arguments
+                            ?.first()
+                            ?.typeOrNull
+                            ?: throw StmLoweringException("Expected delegate field for property $propertyName to be defined and have a type")
+                    )
                 }
             )
         }
@@ -414,7 +422,7 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
         setVar: IrFunctionSymbol
     ): IrFunction? {
         val setterFunDescriptor =
-            irClass.descriptor.findMethods(StmResolveExtension.setterName(propertyName)).firstOrNull()
+            irClass.findMethodDescriptor(StmResolveExtension.setterName(propertyName))
                 ?: return null
 
         return irClass.contributeFunction(setterFunDescriptor, declareNew = true) { f ->
@@ -429,7 +437,7 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
                 dispatchReceiver = stmFieldExpr,
                 callee = setVar,
                 args = *arrayOf(irGet(stmContextParam), delegateFieldExpr, irGet(newValueParameter)),
-                typeHint = irClass.module.builtIns.unitType.toIrType()
+                typeHint = context.irBuiltIns.unitType
             ).apply {
                 putTypeArgument(index = 0, type = newValueParameter.type)
             }
@@ -454,10 +462,7 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
         val getterFun = addGetFunction(irClass, propertyName, delegate, stmField, getVar)
         val setterFun = addSetFunction(irClass, propertyName, delegate, stmField, setVar)
 
-        if (getterFun != null)
-            result += getterFun
-        if (setterFun != null)
-            result += setterFun
+        result += listOfNotNull(getterFun, setterFun)
 
         return result
     }
@@ -483,6 +488,14 @@ open class StmIrGenerator {
                 )
             )
                 ?: throw StmLoweringException("Couldn't find $className runtime class in dependencies of module ${module.name}")
+
+        private fun findSTMContextTypeOrThrow(
+            module: ModuleDescriptor,
+            symbolTable: SymbolTable
+        ): IrType =
+            findSTMClassDescriptorOrThrow(module, symbolTable, STM_CONTEXT)
+                .let(symbolTable::referenceClass)
+                .defaultType
 
         private fun findMethodDescriptorOrThrow(
             module: ModuleDescriptor,
@@ -682,31 +695,41 @@ open class StmIrGenerator {
 
         fun patchFunction(
             oldFunction: IrFunction,
-            compilerContext: IrPluginContext,
+            symbolTable: SymbolTable,
             argumentMap: HashMap<IrValueSymbol, IrValueParameter>
         ): IrFunction {
             val oldDescriptor = oldFunction.descriptor
-            val newDescriptor = StmResolveExtension.createAndInitFunctionDescriptor(
-                containingDeclaration = oldDescriptor.containingDeclaration,
-                sourceElement = oldDescriptor.source,
-                functionName = oldDescriptor.name,
-                dispatchReceiverParameter = oldDescriptor.dispatchReceiverParameter,
-                extensionReceiverParameter = oldDescriptor.extensionReceiverParameter,
-                type = oldDescriptor.returnType
-                    ?: throw StmLoweringException("Function ${oldDescriptor.name} must have an initialized return type"),
-                visibility = oldDescriptor.visibility,
-                typeParameters = oldDescriptor.typeParameters
-            ) { f ->
-                oldDescriptor.valueParameters.forEach { add(it.copy(f, it.name, it.index)) }
-                this.add(StmResolveExtension.createContextValueParam(oldDescriptor.module, oldDescriptor.source, f, index = this.size))
-            }
 
-            val newFunction = STMGenerator(compilerContext).declareFunction(
-                parent = oldFunction.parent,
-                descriptor = newDescriptor,
-                declareNew = true
+            val newDescriptor = WrappedSimpleFunctionDescriptor()
+            val newFunction = IrFunctionImpl(
+                startOffset = UNDEFINED_OFFSET,
+                endOffset = UNDEFINED_OFFSET,
+                origin = STM_PLUGIN_ORIGIN,
+                symbol = IrSimpleFunctionSymbolImpl(newDescriptor),
+                name = oldFunction.name,
+                visibility = Visibilities.LOCAL,
+                modality = oldDescriptor.modality,
+                returnType = oldFunction.returnType,
+                isInline = oldFunction.isInline,
+                isExternal = oldFunction.isExternal,
+                isTailrec = oldFunction.safeAs<IrSimpleFunction>()?.isTailrec ?: false,
+                isSuspend = oldFunction.isSuspend,
+                isExpect = oldFunction.isExpect,
+                isFakeOverride = false,
+                isOperator = false
             ).apply {
-                this.body = oldFunction.body?.deepCopyWithSymbols(initialParent = this)
+                newDescriptor.bind(this)
+                parent = oldFunction.parent
+                extensionReceiverParameter = oldFunction.extensionReceiverParameter
+                dispatchReceiverParameter = oldFunction.dispatchReceiverParameter
+                body = oldFunction.body?.deepCopyWithSymbols(initialParent = this)
+                valueParameters = oldFunction.valueParameters.map { it.copyTo(this) } + buildValueParameter {
+                    type = findSTMContextTypeOrThrow(oldFunction.module, symbolTable)
+                    index = oldFunction.valueParameters.size
+                    name = "ctx".synthesizedName
+                    parent = this@apply
+                }
+                patchDeclarationParents(this)
             }
 
             oldFunction.valueParameters.forEachIndexed { i, oldArg ->
@@ -727,9 +750,6 @@ open class StmIrGenerator {
             symbolTable: SymbolTable,
             compilerContext: IrPluginContext
         ): IrCall {
-            // TODO: support (extension) property access with no backing field!
-            // In this case we must not substitute getter/setter with synthetic members!
-
             val propertyName = accessorDescriptor.correspondingProperty.name
 
             if (propertyName.asString().startsWith(STM_FIELD_NAME))
