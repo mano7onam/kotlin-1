@@ -1,8 +1,6 @@
 // CURIOUS_ABOUT <init>, invoke, g, f, a, _____get_firstName$_______Sharable____, _____get_lastName$_______Sharable____, _set_____firstName$_______Sharable____, _set_____lastName$_______Sharable____, toString, hashCode
 // WITH_RUNTIME
 
-package koko
-
 import kotlinx.stm.*
 
 @SharedMutable

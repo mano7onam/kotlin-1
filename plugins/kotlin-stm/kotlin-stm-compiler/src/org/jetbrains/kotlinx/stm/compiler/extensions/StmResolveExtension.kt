@@ -7,7 +7,9 @@ package org.jetbrains.kotlinx.stm.compiler.extensions
 
 import org.jetbrains.kotlin.backend.common.descriptors.synthesizedName
 import org.jetbrains.kotlin.descriptors.*
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationDescriptor
 import org.jetbrains.kotlin.descriptors.annotations.Annotations
+import org.jetbrains.kotlin.descriptors.annotations.createDeprecatedAnnotation
 import org.jetbrains.kotlin.descriptors.impl.SimpleFunctionDescriptorImpl
 import org.jetbrains.kotlin.descriptors.impl.ValueParameterDescriptorImpl
 import org.jetbrains.kotlin.incremental.components.NoLookupLocation
@@ -50,6 +52,13 @@ open class StmResolveExtension : SyntheticResolveExtension {
         internal fun undoSetterName(name: Name) =
             identifier(name.asString().removePrefix(SET_PREFIX).removeSuffix(SHARABLE_NAME_SUFFIX))
 
+        private fun createDeprecatedHiddenAnnotation(module: ModuleDescriptor): AnnotationDescriptor {
+            return module.builtIns.createDeprecatedAnnotation(
+                "This synthesized declaration should not be used directly",
+                level = "HIDDEN"
+            )
+        }
+
         fun createAndInitFunctionDescriptor(
             containingDeclaration: DeclarationDescriptor,
             sourceElement: SourceElement,
@@ -63,7 +72,7 @@ open class StmResolveExtension : SyntheticResolveExtension {
         ): SimpleFunctionDescriptor {
             val descriptor = SimpleFunctionDescriptorImpl.create(
                 containingDeclaration,
-                Annotations.EMPTY,
+                Annotations.create(listOf(createDeprecatedHiddenAnnotation(containingDeclaration.module))),
                 functionName,
                 CallableMemberDescriptor.Kind.SYNTHESIZED,
                 sourceElement
@@ -105,12 +114,14 @@ open class StmResolveExtension : SyntheticResolveExtension {
                 source = sourceElement
             )
 
-        internal fun findSTMContextClass(module: ModuleDescriptor) = module.findClassAcrossModuleDependencies(
-            ClassId(
-                STM_PACKAGE,
-                STM_CONTEXT
+        internal fun findSTMContextClass(module: ModuleDescriptor) = requireNotNull(
+            module.findClassAcrossModuleDependencies(
+                ClassId(
+                    STM_PACKAGE,
+                    STM_CONTEXT
+                )
             )
-        ) ?: throw StmResolveException("Couldn't find $STM_CONTEXT runtime class in dependencies of module ${module.name}")
+        ) { "Couldn't find $STM_CONTEXT runtime class in dependencies of module ${module.name}" }
 
         fun createContextValueParam(
             module: ModuleDescriptor,
@@ -191,19 +202,4 @@ open class StmResolveExtension : SyntheticResolveExtension {
 
 
     }
-}
-//
-//@Shared
-//class С {
-//    public val x = 10
-//
-//    private val x_delegate: Delegate<Int> = stm.wrap(10)
-//
-//    fun get_X_BLA(ctx) = x_delegate.get()
-//    fun set_X_BLA(ctx, value) = x_delegate.set(value)
-//}
-// @S fun f() { print(C().get_X_BLA(ctx)) }
-
-class StmResolveException(s: String) : Exception() {
-    override val message = s
 }

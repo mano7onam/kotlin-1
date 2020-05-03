@@ -35,18 +35,3 @@ class StmComponentRegistrar : ComponentRegistrar {
     }
 }
 
-class StmPluginComponentContainerContributor : StorageComponentContainerContributor {
-    override fun registerModuleComponents(
-        container: StorageComponentContainer,
-        platform: TargetPlatform,
-        moduleDescriptor: ModuleDescriptor
-    ) {
-        container.useInstance(object : DeclarationChecker {
-            override fun check(
-                declaration: KtDeclaration,
-                descriptor: DeclarationDescriptor,
-                context: DeclarationCheckerContext
-            ) {}
-        })
-    }
-}

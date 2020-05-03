@@ -104,14 +104,13 @@ private class StmCallLowering(
         val callee = expression.symbol.descriptor
         val containingDecl = callee.containingDeclaration
 
-        val res = if (containingDecl is ClassDescriptor && containingDecl.isSharedClass() && callee is PropertyAccessorDescriptor)
-            StmIrGenerator.patchPropertyAccess(expression, callee, functionStack, pluginContext.symbolTable, pluginContext)
-        else if (callee.isAtomicFunction())
-            StmIrGenerator.patchAtomicFunctionCall(expression, expression.symbol, functionStack, funTransformMap)
-        else
-            expression
-
-        return res
+        return when {
+            containingDecl is ClassDescriptor
+                    && containingDecl.isSharedClass()
+                    && callee is PropertyAccessorDescriptor -> StmIrGenerator.patchPropertyAccess(expression, callee, functionStack, pluginContext.symbolTable, pluginContext)
+            callee.isAtomicFunction() -> StmIrGenerator.patchAtomicFunctionCall(expression, expression.symbol, functionStack, funTransformMap)
+            else -> expression
+        }
     }
 
 }
@@ -129,9 +128,7 @@ open class StmLoweringExtension : IrGenerationExtension {
 
         // apply in order:
         arrayOf(stmFunctionLowering, stmClassLowering, stmCallLowering).forEach { lowering ->
-            moduleFragment.files.forEach { file ->
-                file.accept(lowering, null)
-            }
+            moduleFragment.transformChildrenVoid(lowering)
         }
     }
 }
