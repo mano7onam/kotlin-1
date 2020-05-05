@@ -223,6 +223,10 @@ class KotlinInlayParameterHintsProvider : InlayParameterHintsProvider {
         }
         return null
     }
+
+    override fun getMainCheckboxText(): String {
+        return KotlinBundle.message("hints.title.parameter")
+    }
 }
 
 fun PsiElement.isNameReferenceInCall() =
