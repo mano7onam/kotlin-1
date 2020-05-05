@@ -5,14 +5,22 @@
 
 package org.jetbrains.kotlin.idea.parameterInfo
 
-import com.intellij.codeInsight.hints.HintInfo
-import com.intellij.codeInsight.hints.InlayInfo
-import com.intellij.codeInsight.hints.InlayParameterHintsProvider
-import com.intellij.codeInsight.hints.Option
+import com.intellij.codeInsight.hints.*
+import com.intellij.codeInsight.hints.presentation.InlayPresentation
+import com.intellij.codeInsight.hints.presentation.InsetPresentation
+import com.intellij.codeInsight.hints.presentation.MenuOnClickPresentation
+import com.intellij.codeInsight.hints.settings.InlayHintsConfigurable
 import com.intellij.lang.Language
 import com.intellij.lang.java.JavaLanguage
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
+import com.intellij.ui.layout.panel
 import org.jetbrains.kotlin.descriptors.ConstructorDescriptor
 import org.jetbrains.kotlin.descriptors.FunctionDescriptor
 import org.jetbrains.kotlin.idea.KotlinBundle
@@ -24,6 +32,7 @@ import org.jetbrains.kotlin.psi.psiUtil.endOffset
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
 import org.jetbrains.kotlin.resolve.descriptorUtil.fqNameOrNull
 import org.jetbrains.kotlin.resolve.descriptorUtil.fqNameSafe
+import javax.swing.JComponent
 
 enum class HintType(val showDesc: String, val doNotShowDesc: String, defaultEnabled: Boolean) {
 
@@ -231,3 +240,176 @@ class KotlinInlayParameterHintsProvider : InlayParameterHintsProvider {
 
 fun PsiElement.isNameReferenceInCall() =
     this is KtNameReferenceExpression && parent is KtCallExpression
+
+
+@Suppress("UnstableApiUsage")
+class KotlinReferencesTypeHintsProvider : InlayHintsProvider<KotlinReferencesTypeHintsProvider.Settings> {
+
+    data class Settings(
+        var propertyType: Boolean = false,
+        var localVariableType: Boolean = false,
+        var functionReturnType: Boolean = false,
+        var parameterType: Boolean = false
+    )
+
+    override val key: SettingsKey<Settings>
+        get() = SettingsKey("KotlinReferencesTypeHints")
+    override val name: String
+        get() = "Reference type"
+    override val previewText: String?
+        get() = ""
+
+    override fun createConfigurable(settings: Settings): ImmediateConfigurable {
+        return object : ImmediateConfigurable {
+            override fun createComponent(listener: ChangeListener): JComponent = panel {}
+
+            override val mainCheckboxText: String
+                get() = "Show hints for:"
+
+            override val cases: List<ImmediateConfigurable.Case>
+                get() = listOf(
+                    ImmediateConfigurable.Case("Property type", "hints.type.property", settings::propertyType),
+                    ImmediateConfigurable.Case("Local variable type", "hints.type.variable", settings::localVariableType),
+                    ImmediateConfigurable.Case("Function return type", "hints.type.function.return", settings::functionReturnType),
+                    ImmediateConfigurable.Case("Parameter type", "hints.type.function.parameter", settings::parameterType),
+                )
+        }
+    }
+
+    override fun createSettings(): Settings = Settings(false, false, false, false)
+
+    override fun getCollectorFor(file: PsiFile, editor: Editor, settings: Settings, sink: InlayHintsSink): InlayHintsCollector? {
+        return object : FactoryInlayHintsCollector(editor) {
+            override fun collect(element: PsiElement, editor: Editor, sink: InlayHintsSink): Boolean {
+                val resolved = HintType.resolve(element) ?: return true
+                val enabled = when (resolved) {
+                    HintType.PROPERTY_HINT -> settings.propertyType
+                    HintType.LOCAL_VARIABLE_HINT -> settings.localVariableType
+                    HintType.FUNCTION_HINT -> settings.functionReturnType
+                    HintType.PARAMETER_TYPE_HINT -> settings.parameterType
+                    else -> false
+                }
+
+                if (!enabled) return true
+
+                resolved.provideHints(element)
+                    .mapNotNull { info -> convert(info, editor.project) }
+                    .forEach { triple -> sink.addInlineElement(triple.first, triple.second, triple.third) }
+                return true
+            }
+
+            // todo: take care of black list
+
+            fun convert(inlayInfo: InlayInfo, project: Project?): Triple<Int, Boolean, InlayPresentation>? {
+                if (project == null) return null
+                val inlayText = getInlayPresentation(inlayInfo.text)
+                val presentation = factory.roundWithBackground(factory.smallText(inlayText))
+
+                val finalPresentation = InsetPresentation(MenuOnClickPresentation(presentation, project) {
+                    val provider = this@KotlinReferencesTypeHintsProvider
+                    listOf(
+                        InlayProviderDisablingAction(provider.name, file.language, project, provider.key),
+                        ShowInlayHintsSettings()
+                    )
+                }, left = 1)
+
+                return Triple(inlayInfo.offset, inlayInfo.relatesToPrecedingText, finalPresentation)
+            }
+
+            fun getInlayPresentation(inlayText: String): String =
+                if (inlayText.startsWith(TYPE_INFO_PREFIX)) {
+                    inlayText.substring(TYPE_INFO_PREFIX.length)
+                } else {
+                    "$inlayText:"
+                }
+        }
+    }
+}
+
+// todo: localization
+@Suppress("UnstableApiUsage")
+class KotlinLambdasHintsProvider : InlayHintsProvider<KotlinLambdasHintsProvider.Settings> {
+
+    data class Settings(
+        var returnExpressions: Boolean = false,
+        var implicitReceiversAndParams: Boolean = false,
+    )
+
+    override val key: SettingsKey<Settings> = SettingsKey("KotlinLambdaHints")
+    override val name: String = "Lambdas"
+    override val previewText: String? = ""
+
+    override fun createConfigurable(settings: Settings): ImmediateConfigurable {
+        return object : ImmediateConfigurable {
+            override fun createComponent(listener: ChangeListener): JComponent = panel {}
+
+            override val mainCheckboxText: String
+                get() = "Show hints for:"
+
+            override val cases: List<ImmediateConfigurable.Case>
+                get() = listOf(
+                    ImmediateConfigurable.Case("Lambda return expression", "hints.lambda.return_expr", settings::returnExpressions),
+                    ImmediateConfigurable.Case(
+                        "Implicit receivers and parameters of lambdas",
+                        "hints.lambda.receivers.parameters",
+                        settings::implicitReceiversAndParams
+                    )
+                )
+        }
+    }
+
+    override fun createSettings(): Settings = Settings(returnExpressions = false, implicitReceiversAndParams = false) // todo: check state
+
+    override fun getCollectorFor(file: PsiFile, editor: Editor, settings: Settings, sink: InlayHintsSink): InlayHintsCollector? {
+        return object : FactoryInlayHintsCollector(editor) {
+            override fun collect(element: PsiElement, editor: Editor, sink: InlayHintsSink): Boolean {
+                val resolved = HintType.resolve(element) ?: return true
+                val enabled = when (resolved) {
+                    HintType.LAMBDA_RETURN_EXPRESSION -> settings.returnExpressions
+                    HintType.LAMBDA_IMPLICIT_PARAMETER_RECEIVER -> settings.implicitReceiversAndParams
+                    else -> false
+                }
+
+                if (!enabled) return true
+
+                resolved.provideHints(element)
+                    .mapNotNull { info -> convert(info, editor.project) }
+                    .forEach { triple -> sink.addInlineElement(triple.first, triple.second, triple.third) }
+                return true
+            }
+
+            // todo: take care of black list
+
+            fun convert(inlayInfo: InlayInfo, project: Project?): Triple<Int, Boolean, InlayPresentation>? {
+                if (project == null) return null
+                val inlayText = getInlayPresentation(inlayInfo.text)
+                val presentation = factory.roundWithBackground(factory.smallText(inlayText))
+
+                val finalPresentation = InsetPresentation(MenuOnClickPresentation(presentation, project) {
+                    val provider = this@KotlinLambdasHintsProvider
+                    listOf(
+                        InlayProviderDisablingAction(provider.name, file.language, project, provider.key),
+                        ShowInlayHintsSettings()
+                    )
+                }, left = 1)
+
+                return Triple(inlayInfo.offset, inlayInfo.relatesToPrecedingText, finalPresentation)
+            }
+
+            fun getInlayPresentation(inlayText: String): String =
+                if (inlayText.startsWith(TYPE_INFO_PREFIX)) {
+                    inlayText.substring(TYPE_INFO_PREFIX.length)
+                } else {
+                    "$inlayText:"
+                }
+        }
+    }
+}
+
+class ShowInlayHintsSettings : AnAction("Hints Settings...") {
+    override fun actionPerformed(e: AnActionEvent) {
+        val file = CommonDataKeys.PSI_FILE.getData(e.dataContext) ?: return
+        val fileLanguage = file.language
+        InlayHintsConfigurable.showSettingsDialogForLanguage(file.project, fileLanguage) // todo: more precise navigation needed
+    }
+}
