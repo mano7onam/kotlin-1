@@ -437,6 +437,7 @@
     <codeInsight.parameterNameHints language="kotlin" implementationClass="org.jetbrains.kotlin.idea.parameterInfo.KotlinInlayParameterHintsProvider"/>
     <codeInsight.inlayProvider language="kotlin" implementationClass="org.jetbrains.kotlin.idea.parameterInfo.KotlinReferencesTypeHintsProvider"/>
     <codeInsight.inlayProvider language="kotlin" implementationClass="org.jetbrains.kotlin.idea.parameterInfo.KotlinLambdasHintsProvider"/>
+    <codeInsight.inlayProvider language="kotlin" implementationClass="org.jetbrains.kotlin.idea.parameterInfo.KotlinSuspendingCallHintsProvider"/>
 
     <codeInsight.gotoSuper language="kotlin" implementationClass="org.jetbrains.kotlin.idea.codeInsight.GotoSuperActionHandler"/>
 
