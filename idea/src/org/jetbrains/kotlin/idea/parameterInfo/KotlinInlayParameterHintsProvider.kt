@@ -243,6 +243,79 @@ fun PsiElement.isNameReferenceInCall() =
 
 
 @Suppress("UnstableApiUsage")
+class KotlinParameterNameHintsProvider : InlayHintsProvider<KotlinParameterNameHintsProvider.Settings> {
+
+    data class Settings(
+        var parameterNames: Boolean = false
+    )
+
+    override val key: SettingsKey<Settings> = SettingsKey("KotlinParameterNamesHints")
+    override val name: String = "Parameter names"
+    override val previewText: String? = ""
+
+    override fun createConfigurable(settings: Settings): ImmediateConfigurable {
+        return object : ImmediateConfigurable {
+            override fun createComponent(listener: ChangeListener): JComponent = panel {}
+
+            override val mainCheckboxText: String
+                get() = "Show hints for:"
+
+            override val cases: List<ImmediateConfigurable.Case>
+                get() = listOf(
+                    ImmediateConfigurable.Case("Argument names", "hints.argument.names", settings::parameterNames)
+                )
+        }
+    }
+
+    override fun createSettings(): Settings = Settings(parameterNames = false) // todo: check state
+
+    override fun getCollectorFor(file: PsiFile, editor: Editor, settings: Settings, sink: InlayHintsSink): InlayHintsCollector? {
+        return object : FactoryInlayHintsCollector(editor) {
+            override fun collect(element: PsiElement, editor: Editor, sink: InlayHintsSink): Boolean {
+                val resolved = HintType.resolve(element) ?: return true
+                val enabled = when (resolved) {
+                    HintType.PARAMETER_HINT -> settings.parameterNames
+                    else -> false
+                }
+
+                if (!enabled) return true
+
+                resolved.provideHints(element)
+                    .mapNotNull { info -> convert(info, editor.project) }
+                    .forEach { triple -> sink.addInlineElement(triple.first, triple.second, triple.third) }
+                return true
+            }
+
+            // todo: take care of black list
+
+            fun convert(inlayInfo: InlayInfo, project: Project?): Triple<Int, Boolean, InlayPresentation>? {
+                if (project == null) return null
+                val inlayText = getInlayPresentation(inlayInfo.text)
+                val presentation = factory.roundWithBackground(factory.smallText(inlayText))
+
+                val finalPresentation = InsetPresentation(MenuOnClickPresentation(presentation, project) {
+                    val provider = this@KotlinParameterNameHintsProvider
+                    listOf(
+                        InlayProviderDisablingAction(provider.name, file.language, project, provider.key),
+                        ShowInlayHintsSettings()
+                    )
+                }, left = 1)
+
+                return Triple(inlayInfo.offset, inlayInfo.relatesToPrecedingText, finalPresentation)
+            }
+
+            fun getInlayPresentation(inlayText: String): String =
+                if (inlayText.startsWith(TYPE_INFO_PREFIX)) {
+                    inlayText.substring(TYPE_INFO_PREFIX.length)
+                } else {
+                    "$inlayText:"
+                }
+        }
+    }
+}
+
+
+@Suppress("UnstableApiUsage")
 class KotlinReferencesTypeHintsProvider : InlayHintsProvider<KotlinReferencesTypeHintsProvider.Settings> {
 
     data class Settings(
