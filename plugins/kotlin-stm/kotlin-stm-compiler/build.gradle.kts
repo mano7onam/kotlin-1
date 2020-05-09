@@ -6,7 +6,7 @@ plugins {
 }
 
 repositories {
-    mavenLocal()
+    maven { setUrl("https://dl.bintray.com/ololoshechkin/kotlinx-stm-runtime") }
 }
 
 dependencies {
@@ -24,7 +24,7 @@ dependencies {
 
     testCompile(projectTests(":compiler:tests-common"))
     testCompile(commonDep("junit:junit"))
-    testCompile("org.jetbrains.kotlinx:kotlinx-stm-runtime:0.0.1")
+    testCompile("org.jetbrains.kotlinx:kotlinx-stm-runtime:0.0.1-tmp3")
 
     testRuntimeOnly(intellijCoreDep()) { includeJars("intellij-core") }
 
