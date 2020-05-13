@@ -1,4 +1,4 @@
-// CURIOUS_ABOUT <init>, invoke, g, f, a, _____get_firstName$_______Sharable____, _____get_lastName$_______Sharable____, _set_____firstName$_______Sharable____, _set_____lastName$_______Sharable____, toString, hashCode
+// CURIOUS_ABOUT <init>, invoke, g, f, a, b, c, d, _____get_firstName$_______Sharable____, _____get_lastName$_______Sharable____, _set_____firstName$_______Sharable____, _set_____lastName$_______Sharable____, toString, hashCode
 // WITH_RUNTIME
 
 import kotlinx.stm.*
@@ -30,8 +30,17 @@ class User(fname: String, lname: String) {
 
 
 @AtomicFunction
+fun User.d(block: (User) -> String) = block(this)
+
+@AtomicFunction
+fun ((User) -> User).c(u: User, block: (User) -> String) = this(u).d(block)
+
+@AtomicFunction
+fun b(u: User, transform: (User) -> User, block: (User) -> String) = transform.c(u, block)
+
+@AtomicFunction
 fun a(u: User) {
-    println("atomic user is: ${u.firstName} ${u.lastName}")
+    println(b(u, { it }) { "atomic user is: ${u.firstName} ${u.lastName}" })
 }
 
 fun g() {

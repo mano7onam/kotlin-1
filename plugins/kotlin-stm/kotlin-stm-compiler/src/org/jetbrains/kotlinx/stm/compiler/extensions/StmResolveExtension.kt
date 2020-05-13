@@ -28,17 +28,6 @@ import org.jetbrains.kotlinx.stm.compiler.*
 open class StmResolveExtension : SyntheticResolveExtension {
 
     companion object {
-        internal fun shareFqName(name: FqName): Name =
-            identifier("$name${SHARABLE_NAME_SUFFIX}")
-
-        internal fun sharedName(name: Name): Name =
-            identifier("$name${SHARABLE_NAME_SUFFIX}")
-
-        internal fun immutableName(name: Name): Name =
-            identifier(name.asString().removeSuffix(SHARABLE_NAME_SUFFIX))
-
-        internal fun nestedDelegateName(thisDescriptor: ClassDescriptor): Name =
-            shareFqName(thisDescriptor.fqNameSafe)
 
         internal fun getterName(name: Name) =
             identifier("$GET_PREFIX$name$SHARABLE_NAME_SUFFIX")
@@ -199,7 +188,6 @@ open class StmResolveExtension : SyntheticResolveExtension {
 
             result += newSetter
         }
-
 
     }
 }

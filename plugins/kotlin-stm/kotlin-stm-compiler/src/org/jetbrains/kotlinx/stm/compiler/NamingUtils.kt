@@ -19,9 +19,10 @@ internal val STM_CONTEXT = Name.identifier("STMContext")
 
 internal val UNIVERSAL_DELEGATE = Name.identifier("UniversalDelegate")
 
-internal val STM_SEARCHER = Name.identifier("STMSearcher")
-
-internal val SEARCH_STM_METHOD = Name.identifier("getSTM")
+internal val SEARCH_JAVA_STM_METHOD = Name.identifier("findJavaSTM")
+internal val SEARCH_JS_STM_METHOD = Name.identifier("findJsSTM")
+internal val SEARCH_NATIVE_STM_METHOD = Name.identifier("findNativeSTM")
+internal val DEFAULT_SUFFIX = Name.identifier("Default")
 
 internal val GET_CONTEXT = Name.identifier("getContext")
 
@@ -33,11 +34,15 @@ internal val SET_VAR_METHOD = Name.identifier("setVar")
 
 internal val RUN_ATOMICALLY_METHOD = Name.identifier("runAtomically")
 
+internal val RUN_ATOMICALLY_GLOBAL_FUNCTION = Name.identifier("runAtomically")
+
 internal val SHARED_MUTABLE_ANNOTATION = FqName("$STM_PACKAGE.SharedMutable")
 
 internal val ATOMIC_FUNCTION_ANNOTATION_NAME = Name.identifier("AtomicFunction")
 
 internal val ATOMIC_FUNCTION_ANNOTATION = FqName("$STM_PACKAGE.${ATOMIC_FUNCTION_ANNOTATION_NAME.identifier}")
+
+internal val TEMPORARY_IR_FUNCTION_ANNOTATION = FqName("$STM_PACKAGE.TemporaryIrFunction")
 
 internal val STM_CONTEXT_CLASS = FqName("$STM_PACKAGE.${STM_CONTEXT.identifier}")
 

@@ -23,14 +23,18 @@ import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
-import org.jetbrains.kotlin.ir.visitors.acceptVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlinx.stm.compiler.ATOMIC_FUNCTION_ANNOTATION
+import org.jetbrains.kotlinx.stm.compiler.RUN_ATOMICALLY_METHOD
 import org.jetbrains.kotlinx.stm.compiler.SHARED_MUTABLE_ANNOTATION
+import org.jetbrains.kotlinx.stm.compiler.TEMPORARY_IR_FUNCTION_ANNOTATION
 import org.jetbrains.kotlinx.stm.compiler.backend.ir.StmIrGenerator
 
 private fun IrFunction.isAtomicFunction() = this.annotations.hasAnnotation(ATOMIC_FUNCTION_ANNOTATION)
 private fun FunctionDescriptor.isAtomicFunction() = this.annotations.hasAnnotation(ATOMIC_FUNCTION_ANNOTATION)
+
+private fun FunctionDescriptor.isRunAtomically() = this.annotations.hasAnnotation(TEMPORARY_IR_FUNCTION_ANNOTATION)
+        && this.name == RUN_ATOMICALLY_METHOD
 
 private fun IrClass.isSharedClass() = this.annotations.hasAnnotation(SHARED_MUTABLE_ANNOTATION)
 private fun ClassDescriptor.isSharedClass() = this.annotations.hasAnnotation(SHARED_MUTABLE_ANNOTATION)
@@ -107,8 +111,24 @@ private class StmCallLowering(
         return when {
             containingDecl is ClassDescriptor
                     && containingDecl.isSharedClass()
-                    && callee is PropertyAccessorDescriptor -> StmIrGenerator.patchPropertyAccess(expression, callee, functionStack, pluginContext.symbolTable, pluginContext)
-            callee.isAtomicFunction() -> StmIrGenerator.patchAtomicFunctionCall(expression, expression.symbol, functionStack, funTransformMap)
+                    && callee is PropertyAccessorDescriptor -> StmIrGenerator.patchPropertyAccess(
+                expression,
+                callee,
+                functionStack,
+                pluginContext.symbolTable,
+                pluginContext
+            )
+            callee.isAtomicFunction() -> StmIrGenerator.patchAtomicFunctionCall(
+                expression,
+                expression.symbol,
+                functionStack,
+                funTransformMap
+            )
+            callee.isRunAtomically() -> StmIrGenerator.patchRunAtomicallyCall(
+                expression,
+                expression.symbol,
+                pluginContext
+            )
             else -> expression
         }
     }

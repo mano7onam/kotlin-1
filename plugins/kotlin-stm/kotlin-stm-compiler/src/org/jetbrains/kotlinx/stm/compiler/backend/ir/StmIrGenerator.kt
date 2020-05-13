@@ -14,6 +14,7 @@ import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
 import org.jetbrains.kotlin.backend.common.lower.parents
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.descriptors.*
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.builders.declarations.*
@@ -34,8 +35,16 @@ import org.jetbrains.kotlin.ir.types.impl.IrSimpleTypeBuilder
 import org.jetbrains.kotlin.ir.types.impl.buildSimpleType
 import org.jetbrains.kotlin.ir.types.impl.makeTypeProjection
 import org.jetbrains.kotlin.ir.util.*
+import org.jetbrains.kotlin.ir.visitors.IrElementVisitor
+import org.jetbrains.kotlin.ir.visitors.IrElementVisitorVoid
+import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
+import org.jetbrains.kotlin.ir.visitors.acceptVoid
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.Name
+import org.jetbrains.kotlin.platform.isCommon
+import org.jetbrains.kotlin.platform.isMultiPlatform
+import org.jetbrains.kotlin.platform.js.isJs
+import org.jetbrains.kotlin.platform.jvm.isJvm
 import org.jetbrains.kotlin.resolve.descriptorUtil.module
 import org.jetbrains.kotlin.types.KotlinType
 import org.jetbrains.kotlin.types.TypeProjectionImpl
@@ -84,10 +93,9 @@ internal fun fetchStmContextOrNull(functionStack: MutableList<IrFunction>): IrGe
 
 class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExtension() {
 
-    fun generateSTMField(irClass: IrClass, field: IrField, initMethod: IrFunctionSymbol, stmSearcherClass: ClassDescriptor) =
+    fun generateSTMField(irClass: IrClass, field: IrField, initMethod: IrFunctionSymbol) =
         irClass.initField(field) {
-            val obj = irGetObject(stmSearcherClass)
-            irCallOp(initMethod, field.type, obj)
+            irCall(initMethod, field.type)
         }
 
     fun createReceiverParam(
@@ -169,7 +177,7 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
                 listOf(
                     TypeProjectionImpl(
                         Variance.INVARIANT,
-                        runAtomically.descriptor.valueParameters[0].type.makeNotNullable(),
+                        runAtomically.descriptor.valueParameters[0].type.makeNotNullable()
                     ),
                     TypeProjectionImpl(
                         Variance.INVARIANT,
@@ -275,12 +283,11 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
         delegate: IrField,
         stmField: IrField,
         getVar: IrFunctionSymbol
-    ): IrFunction? {
+    ) {
         val getterFunDescriptor =
-            irClass.findMethodDescriptor(StmResolveExtension.getterName(propertyName))
-                ?: return null
+            irClass.findMethodDescriptor(StmResolveExtension.getterName(propertyName)) ?: return
 
-        return irClass.contributeFunction(getterFunDescriptor, declareNew = true) { f ->
+        irClass.contributeFunction(getterFunDescriptor) { f ->
             val stmFieldExpr = irGetField(irGet(f.dispatchReceiverParameter!!), stmField)
 
             val stmContextParam = f.valueParameters[0]
@@ -316,12 +323,11 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
         delegate: IrField,
         stmField: IrField,
         setVar: IrFunctionSymbol
-    ): IrFunction? {
+    ) {
         val setterFunDescriptor =
-            irClass.findMethodDescriptor(StmResolveExtension.setterName(propertyName))
-                ?: return null
+            irClass.findMethodDescriptor(StmResolveExtension.setterName(propertyName)) ?: return
 
-        return irClass.contributeFunction(setterFunDescriptor, declareNew = true) { f ->
+        irClass.contributeFunction(setterFunDescriptor) { f ->
             val stmFieldExpr = irGetField(irGet(f.dispatchReceiverParameter!!), stmField)
 
             val stmContextParam = f.valueParameters[0]
@@ -350,20 +356,14 @@ class STMGenerator(override val compilerContext: IrPluginContext) : IrBuilderExt
         getVar: IrFunctionSymbol,
         setVar: IrFunctionSymbol,
         oldDeclaration: IrDeclaration
-    ): List<IrFunction> {
+    ) {
         val delegate =
             addDelegateField(irClass, propertyName, backingField, stmField, wrap, universalDelegateClassSymbol)
 
-        val result = mutableListOf<IrFunction>()
-
-        val getterFun = addGetFunction(irClass, propertyName, delegate, stmField, getVar)
-        val setterFun = addSetFunction(irClass, propertyName, delegate, stmField, setVar)
-
-        result += listOfNotNull(getterFun, setterFun)
+        addGetFunction(irClass, propertyName, delegate, stmField, getVar)
+        addSetFunction(irClass, propertyName, delegate, stmField, setVar)
 
         irClass.declarations -= oldDeclaration
-
-        return result
     }
 }
 
@@ -379,39 +379,59 @@ open class StmIrGenerator {
 
     companion object {
 
-        private fun findSTMClassDescriptorOrThrow(
+        private fun findSTMClassDescriptorOrNull(
             module: ModuleDescriptor,
             className: Name
-        ): ClassDescriptor =
+        ): ClassDescriptor? =
             module.findClassAcrossModuleDependencies(
                 ClassId(
                     STM_PACKAGE,
                     className
                 )
             )
-                ?: throw StmLoweringException("Couldn't find $className runtime class in dependencies of module ${module.name}")
+
+        private fun findSTMClassDescriptorOrThrow(
+            module: ModuleDescriptor,
+            className: Name
+        ) = findSTMClassDescriptorOrNull(module, className)
+            ?: throw StmLoweringException("Couldn't find $className runtime class in dependencies of module ${module.name}")
 
         private fun findSTMContextTypeOrThrow(
             module: ModuleDescriptor,
-            symbolTable: SymbolTable
+            symbolTable: ReferenceSymbolTable
         ): IrType =
             findSTMClassDescriptorOrThrow(module, STM_CONTEXT)
                 .let(symbolTable::referenceClass)
                 .defaultType
 
+        private fun findMethodDescriptorOrNull(
+            classDescriptor: ClassDescriptor,
+            methodName: Name
+        ): SimpleFunctionDescriptor? =
+            classDescriptor.findMethods(methodName).firstOrNull()
+
         private fun findMethodDescriptorOrThrow(
             module: ModuleDescriptor,
             classDescriptor: ClassDescriptor,
             methodName: Name
-        ): SimpleFunctionDescriptor =
-            classDescriptor.findMethods(methodName).firstOrNull()
-                ?: throw StmLoweringException(
-                    "Couldn't find ${classDescriptor.name}.$methodName(...) runtime method in dependencies of module ${module.name}"
+        ) = findMethodDescriptorOrNull(classDescriptor, methodName) ?: throw StmLoweringException(
+            "Couldn't find ${classDescriptor.name}.$methodName(...) runtime method in dependencies of module ${module.name}"
+        )
+
+        private fun findSTMMethodDescriptorOrNull(
+            module: ModuleDescriptor,
+            className: Name,
+            methodName: Name
+        ): SimpleFunctionDescriptor? =
+            findSTMClassDescriptorOrNull(module, className)?.let { classDescriptor ->
+                findMethodDescriptorOrNull(
+                    classDescriptor,
+                    methodName
                 )
+            }
 
         private fun findSTMMethodDescriptorOrThrow(
             module: ModuleDescriptor,
-            symbolTable: SymbolTable,
             className: Name,
             methodName: Name
         ): SimpleFunctionDescriptor = findMethodDescriptorOrThrow(
@@ -420,15 +440,24 @@ open class StmIrGenerator {
             methodName
         )
 
+        private fun findSTMMethodIrOrNull(
+            module: ModuleDescriptor,
+            symbolTable: ReferenceSymbolTable,
+            className: Name,
+            methodName: Name
+        ): IrFunctionSymbol? =
+            findSTMMethodDescriptorOrNull(module, className, methodName)?.let(symbolTable::referenceSimpleFunction)
+
+
         private fun findSTMMethodIrOrThrow(
             module: ModuleDescriptor,
-            symbolTable: SymbolTable,
+            symbolTable: ReferenceSymbolTable,
             className: Name,
             methodName: Name
         ): IrFunctionSymbol =
-            symbolTable.referenceSimpleFunction(findSTMMethodDescriptorOrThrow(module, symbolTable, className, methodName))
+            symbolTable.referenceSimpleFunction(findSTMMethodDescriptorOrThrow(module, className, methodName))
 
-        private fun getSTMField(irClass: IrClass, symbolTable: SymbolTable): IrField {
+        private fun getSTMField(irClass: IrClass, symbolTable: ReferenceSymbolTable): IrField {
             val stmClassSymbol = findSTMClassDescriptorOrThrow(irClass.module, STM_INTERFACE)
                 .let(symbolTable::referenceClass)
 
@@ -449,25 +478,49 @@ open class StmIrGenerator {
             }
         }
 
-        private fun getSTMSearchMethod(module: ModuleDescriptor, symbolTable: SymbolTable): IrFunctionSymbol =
-            findSTMMethodIrOrThrow(module, symbolTable, STM_SEARCHER, SEARCH_STM_METHOD)
+        private fun getSTMSearchFunction(
+            module: ModuleDescriptor,
+            compilerContext: IrPluginContext
+        ): IrFunctionSymbol {
+            val methodBaseName = when {
+                module.platform.isJs() -> SEARCH_JS_STM_METHOD
+                module.platform.isJvm() -> SEARCH_JAVA_STM_METHOD
+                module.platform.isMultiPlatform() -> error("Unexpected platform in IR code: Multiplatform")
+                module.platform.isCommon() -> error("Unexpected platform in IR code: Common")
+                else -> SEARCH_NATIVE_STM_METHOD
+            }
+            val methodDefaultName = Name.identifier("$methodBaseName$DEFAULT_SUFFIX")
 
-        private fun getSTMWrapMethod(module: ModuleDescriptor, symbolTable: SymbolTable): IrFunctionSymbol =
+            return compilerContext.referenceFunctions(STM_PACKAGE.child(methodBaseName)).singleOrNull()
+                ?: compilerContext.referenceFunctions(STM_PACKAGE.child(methodDefaultName)).singleOrNull()
+                ?: throw StmLoweringException("Expected $methodDefaultName to be visible in module ${module.name}")
+        }
+
+        private fun getRunAtomicallyFunction(
+            module: ModuleDescriptor,
+            compilerContext: IrPluginContext
+        ): IrFunctionSymbol =
+            compilerContext.referenceFunctions(STM_PACKAGE.child(RUN_ATOMICALLY_GLOBAL_FUNCTION))
+                .find { it.descriptor.valueParameters.size == 2 }
+                ?: throw StmLoweringException("Expected $RUN_ATOMICALLY_GLOBAL_FUNCTION to be visible in module ${module.name}")
+
+        private fun getSTMWrapMethod(module: ModuleDescriptor, symbolTable: ReferenceSymbolTable): IrFunctionSymbol =
             findSTMMethodIrOrThrow(module, symbolTable, STM_INTERFACE, WRAP_METHOD)
 
-        private fun getSTMGetvarMethod(module: ModuleDescriptor, symbolTable: SymbolTable): IrFunctionSymbol =
+        private fun getSTMGetvarMethod(module: ModuleDescriptor, symbolTable: ReferenceSymbolTable): IrFunctionSymbol =
             findSTMMethodIrOrThrow(module, symbolTable, STM_INTERFACE, GET_VAR_METHOD)
 
-        private fun getSTMSetvarMethod(module: ModuleDescriptor, symbolTable: SymbolTable): IrFunctionSymbol =
+        private fun getSTMSetvarMethod(module: ModuleDescriptor, symbolTable: ReferenceSymbolTable): IrFunctionSymbol =
             findSTMMethodIrOrThrow(module, symbolTable, STM_INTERFACE, SET_VAR_METHOD)
 
-        private fun getSTMSearchClass(module: ModuleDescriptor, symbolTable: SymbolTable): ClassDescriptor =
-            findSTMClassDescriptorOrThrow(module, STM_SEARCHER)
-
-        private fun getRunAtomicallyFun(module: ModuleDescriptor, symbolTable: SymbolTable): IrFunctionSymbol =
+        private fun getRunAtomicallyFun(module: ModuleDescriptor, symbolTable: ReferenceSymbolTable): IrFunctionSymbol =
             findSTMMethodIrOrThrow(module, symbolTable, STM_INTERFACE, RUN_ATOMICALLY_METHOD)
 
-        private fun getSTMContextType(compilerContext: IrPluginContext, module: ModuleDescriptor, symbolTable: SymbolTable): IrType =
+        private fun getSTMContextType(
+            compilerContext: IrPluginContext,
+            module: ModuleDescriptor,
+            symbolTable: ReferenceSymbolTable
+        ): IrType =
             compilerContext.typeTranslator.translateType(
                 findSTMMethodIrOrThrow(module, symbolTable, STM_INTERFACE, GET_CONTEXT).descriptor.returnType!!
             )
@@ -475,14 +528,14 @@ open class StmIrGenerator {
         fun patchSharedClass(
             irClass: IrClass,
             context: IrPluginContext,
-            symbolTable: SymbolTable
+            symbolTable: ReferenceSymbolTable
         ) {
             val generator = STMGenerator(context)
 
             val stmField = getSTMField(irClass, symbolTable)
-            val stmSearch = getSTMSearchMethod(irClass.module, symbolTable)
-            val stmSearchClass = getSTMSearchClass(irClass.module, symbolTable)
-            generator.generateSTMField(irClass, stmField, stmSearch, stmSearchClass)
+            val stmSearch = getSTMSearchFunction(irClass.module, context)
+
+            generator.generateSTMField(irClass, stmField, stmSearch)
 
             val universalDelegateClassSymbol = findSTMClassDescriptorOrThrow(irClass.module, UNIVERSAL_DELEGATE)
                 .let(symbolTable::referenceClass)
@@ -498,7 +551,7 @@ open class StmIrGenerator {
             }
 
             val oldDeclarations = mutableListOf<IrDeclaration>()
-            irClass.declarations.forEach(oldDeclarations::add)
+            irClass.declarations.forEach { oldDeclarations.add(it) }
 
             oldDeclarations.forEach { p ->
                 when (p) {
@@ -537,13 +590,11 @@ open class StmIrGenerator {
                     }
                 }
             }
-
-            println("koko")
         }
 
         private fun getSyntheticAccessorForSharedClass(
             module: ModuleDescriptor,
-            symbolTable: SymbolTable,
+            symbolTable: ReferenceSymbolTable,
             classDescriptor: ClassDescriptor,
             accessorName: Name
         ): IrFunctionSymbol =
@@ -557,7 +608,7 @@ open class StmIrGenerator {
 
         private fun getSyntheticGetterForSharedClass(
             module: ModuleDescriptor,
-            symbolTable: SymbolTable,
+            symbolTable: ReferenceSymbolTable,
             classDescriptor: ClassDescriptor,
             varName: Name
         ): IrFunctionSymbol =
@@ -566,7 +617,7 @@ open class StmIrGenerator {
 
         private fun getSyntheticSetterForSharedClass(
             module: ModuleDescriptor,
-            symbolTable: SymbolTable,
+            symbolTable: ReferenceSymbolTable,
             classDescriptor: ClassDescriptor,
             varName: Name
         ): IrFunctionSymbol =
@@ -598,7 +649,7 @@ open class StmIrGenerator {
 
         fun patchFunction(
             oldFunction: IrFunction,
-            symbolTable: SymbolTable,
+            symbolTable: ReferenceSymbolTable,
             argumentMap: HashMap<IrValueSymbol, IrValueParameter>
         ): IrFunction {
             val oldDescriptor = oldFunction.descriptor
@@ -649,7 +700,7 @@ open class StmIrGenerator {
             irCall: IrCall,
             accessorDescriptor: PropertyAccessorDescriptor,
             functionStack: MutableList<IrFunction>,
-            symbolTable: SymbolTable,
+            symbolTable: ReferenceSymbolTable,
             compilerContext: IrPluginContext
         ): IrCall {
             val propertyName = accessorDescriptor.correspondingProperty.name
@@ -716,7 +767,7 @@ open class StmIrGenerator {
             val extensionReceiver = irCall.extensionReceiver?.deepCopyWithVariables()
             val args = (0 until irCall.valueArgumentsCount)
                 .map(irCall::getValueArgument)
-                .map { it?.deepCopyWithVariables() }
+                .map { it?.deepCopyWithSymbolsAndParent() }
                 .toMutableList()
 
             args += contextValue
@@ -737,5 +788,50 @@ open class StmIrGenerator {
             newValue.symbol,
             expression.origin
         )
+
+
+        private class ParentSearcherVisitor : IrElementVisitorVoid {
+            var result: IrDeclarationParent? = null
+            override fun visitDeclaration(declaration: IrDeclaration) {
+                result = declaration.parent
+            }
+
+            override fun visitElement(element: IrElement) = element.acceptChildrenVoid(this)
+
+        }
+
+        private fun IrElement.findParent(): IrDeclarationParent? = ParentSearcherVisitor().let {
+            this.acceptVoid(it)
+            it.result
+        }
+
+        private inline fun <reified T : IrElement> T.deepCopyWithSymbolsAndParent(): T =
+            this.deepCopyWithSymbols(initialParent = this.findParent())
+
+        fun patchRunAtomicallyCall(
+            irCall: IrCall,
+            irFunction: IrFunctionSymbol,
+            context: IrPluginContext
+        ): IrCall {
+            val newFunction = getRunAtomicallyFunction(irFunction.descriptor.module, context)
+
+            val block = irCall.getValueArgument(0)?.deepCopyWithSymbolsAndParent()
+
+            val stmType = context.typeTranslator.translateType(newFunction.descriptor.valueParameters[0].type)
+            val stmSearch = getSTMSearchFunction(irFunction.descriptor.module, context)
+            val stm = with(DeclarationIrBuilder(context, irFunction, irCall.startOffset, irCall.endOffset)) {
+                irCall(stmSearch, stmType)
+            }
+
+            val res = callFunction(
+                f = newFunction,
+                oldCall = irCall,
+                dispatchReceiver = irCall.dispatchReceiver,
+                extensionReceiver = irCall.extensionReceiver,
+                args = *arrayOf(stm, block)
+            )
+
+            return res
+        }
     }
 }

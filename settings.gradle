@@ -54,6 +54,11 @@ gradleEnterprise {
 
 BuildCacheKt.setupBuildCache(settings)
 
+
+// Please note that include takes an array of module names that is being created by createArray method in groovy.
+// This method looks like vararg but in fact has just 250 overrides and in case number of modules grows larger it would fail
+// to find a proper override. So try to keep this block as small as possible:
+
 // modules
 include ":kotlin-build-common",
         ":benchmarks",
@@ -292,24 +297,23 @@ include ":kotlin-build-common",
         ":libraries:tools:mutability-annotations-compat",
         ":include:kotlin-compiler",
         ":plugins:jvm-abi-gen",
-        ":plugins:jvm-abi-gen-embeddable",
+        ":plugins:jvm-abi-gen-embeddable"
 
-        // plugin markers:
-        ':kotlin-gradle-plugin:plugin-marker',
+// plugin markers:
+include ':kotlin-gradle-plugin:plugin-marker',
         ':kotlin-allopen:plugin-marker',
         ':kotlin-noarg:plugin-marker',
-        ":test-instrumenter",
+        ":test-instrumenter"
 
-        ":kotlinx-serialization-compiler-plugin",
+include ":kotlinx-serialization-compiler-plugin",
         ":kotlinx-serialization-ide-plugin",
         ":kotlin-serialization",
         ":kotlin-serialization-unshaded",
-        ":kotlin-serialization:plugin-marker",
+        ":kotlin-serialization:plugin-marker"
 
-        ":kotlin-stm",
+include ":kotlin-stm",
         ":kotlin-stm-unshaded",
         ":kotlin-stm:plugin-marker",
-
         ":kotlinx-stm-compiler-plugin"
 
 if (buildProperties.includeCidrPlugins) {
@@ -517,7 +521,7 @@ project(':plugins:jvm-abi-gen').projectDir = "$rootDir/plugins/jvm-abi-gen" as F
 project(':plugins:jvm-abi-gen-embeddable').projectDir = "$rootDir/plugins/jvm-abi-gen/embeddable" as File
 project(":dukat").projectDir = "$rootDir/libraries/tools/dukat" as File
 
-project(':js:js.tests').projectDir =  "$rootDir/js/js.tests" as File
+project(':js:js.tests').projectDir = "$rootDir/js/js.tests" as File
 project(':js:js.engines').projectDir = "$rootDir/js/js.engines" as File
 
 // plugin markers:

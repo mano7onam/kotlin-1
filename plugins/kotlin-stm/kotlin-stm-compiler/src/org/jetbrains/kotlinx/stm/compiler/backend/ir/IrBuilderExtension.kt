@@ -28,69 +28,15 @@ import org.jetbrains.kotlin.types.KotlinType
 abstract class IrBuilderExtension() {
     abstract val compilerContext: IrPluginContext
 
-    private fun IrDeclarationContainer.declareSimpleFunctionWithExternalOverrides(
-        descriptor: FunctionDescriptor
-    ): IrSimpleFunction {
+    fun IrClass.contributeFunction(descriptor: FunctionDescriptor, bodyGen: IrBlockBodyBuilder.(IrFunction) -> Unit) {
         val functionSymbol = compilerContext.symbolTable.referenceSimpleFunction(descriptor)
-        val function = if (functionSymbol.isBound) functionSymbol.owner else {
-            compilerContext.symbolTable.declareSimpleFunction(
-                startOffset,
-                endOffset,
-                STM_PLUGIN_ORIGIN,
-                descriptor
-            ).also {
-                it.parent = this
-                declarations.add(it)
-            }
-        }
-        return function.also { f ->
-            f.overriddenSymbols = descriptor.overriddenDescriptors.map {
-                compilerContext.symbolTable.referenceSimpleFunction(it.original)
-            }
-        }
-    }
-
-    private fun createFunctionGenerator(): FunctionGenerator = with(compilerContext) {
-        return FunctionGenerator(
-            DeclarationGenerator(
-                GeneratorContext(
-                    Psi2IrConfiguration(),
-                    moduleDescriptor,
-                    bindingContext,
-                    languageVersionSettings,
-                    symbolTable,
-                    GeneratorExtensions(),
-                    typeTranslator,
-                    typeTranslator.constantValueGenerator,
-                    irBuiltIns
-                )
-            )
-        )
-    }
-
-    fun IrDeclarationContainer.contributeFunction(
-        descriptor: FunctionDescriptor,
-        declareNew: Boolean = false,
-        bodyGen: IrBlockBodyBuilder.(IrFunction) -> Unit
-    ): IrSimpleFunction {
-        val f: IrSimpleFunction = if (declareNew)
-            declareSimpleFunctionWithExternalOverrides(descriptor)
-        else
-            compilerContext.symbolTable.referenceSimpleFunction(descriptor).owner
-        f.buildWithScope {
-            if (declareNew)
-                createFunctionGenerator().generateFunctionParameterDeclarationsAndReturnType(f, null, null)
-            else
-                it.returnType = it.descriptor.returnType!!.toIrType()
-        }
+        assert(functionSymbol.isBound)
+        val f: IrSimpleFunction = functionSymbol.owner
+        // TODO: default parameters
         f.body = DeclarationIrBuilder(compilerContext, f.symbol, this.startOffset, this.endOffset).irBlockBody(
             this.startOffset,
             this.endOffset
         ) { bodyGen(f) }
-
-        f.patchDeclarationParents(this)
-
-        return f
     }
 
     fun IrClass.initField(
@@ -122,13 +68,6 @@ abstract class IrBuilderExtension() {
             classDescriptor.defaultType.toIrType(),
             compilerContext.symbolTable.referenceClass(classDescriptor)
         )
-
-    fun <T : IrDeclaration> T.buildWithScope(builder: (T) -> Unit): T =
-        also { irDeclaration ->
-            compilerContext.symbolTable.withScope(irDeclaration.descriptor) {
-                builder(irDeclaration)
-            }
-        }
 
     fun KotlinType.toIrType() = compilerContext.typeTranslator.translateType(this)
 
