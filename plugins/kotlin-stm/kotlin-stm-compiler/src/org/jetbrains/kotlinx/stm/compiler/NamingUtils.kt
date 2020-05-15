@@ -53,18 +53,8 @@ internal val STM_FIELD_NAME = "_______stm_____"
 fun Name.isSharable() = this.asString().endsWith(SHARABLE_NAME_SUFFIX)
 fun Name.isSTMFieldName() = this.asString().startsWith(STM_FIELD_NAME)
 
-internal val VAR_ACCESS_TEMPORARY_PREFIX = "______var___access__________"
-
 const val GET_PREFIX = "_____get_"
 const val SET_PREFIX = "_set_____"
-
-const val KT_DEFAULT_GET_PREFIX = "<get"
-const val KT_DEFAULT_SET_PREFIX = "<set"
-
-internal fun Name.isSharableViaStmDeclaration() = this.asString().endsWith(org.jetbrains.kotlinx.stm.compiler.SHARABLE_NAME_SUFFIX)
-
-internal fun ClassDescriptor.getParentClass(): ClassDescriptor? =
-    this.containingDeclaration as? ClassDescriptor
 
 internal fun ClassDescriptor.findMethods(name: Name): List<SimpleFunctionDescriptor> =
     this.unsubstitutedMemberScope
