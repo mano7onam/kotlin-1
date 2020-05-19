@@ -49,7 +49,7 @@ import org.jetbrains.org.objectweb.asm.*
 import java.lang.annotation.RetentionPolicy
 
 abstract class AnnotationCodegen(
-    private val innerClassConsumer: InnerClassConsumer,
+    private val classCodegen: ClassCodegen,
     private val context: JvmBackendContext
 ) {
     private val typeMapper = context.typeMapper
@@ -187,7 +187,13 @@ abstract class AnnotationCodegen(
             return null
         }
 
-        innerClassConsumer.addInnerClassInfoFromAnnotation(annotationClass)
+        // It's necessary for proper recovering of classId by plain string JVM descriptor when loading annotations
+        // See FileBasedKotlinClass.convertAnnotationVisitor
+        generateSequence<IrDeclaration>(annotationClass) { it.parent as? IrDeclaration }.takeWhile { !it.isTopLevelDeclaration }.forEach {
+            if (it is IrClass) {
+                classCodegen.addInnerClass(it)
+            }
+        }
 
         val asmTypeDescriptor = typeMapper.mapType(annotation.type).descriptor
         val annotationVisitor =
@@ -340,10 +346,6 @@ abstract class AnnotationCodegen(
         }
     }
 
-}
-
-interface InnerClassConsumer {
-    fun addInnerClassInfoFromAnnotation(innerClass: IrClass)
 }
 
 private fun isBareTypeParameterWithNullableUpperBound(type: IrType): Boolean {

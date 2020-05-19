@@ -101,17 +101,6 @@ val IrType.isExtensionFunctionType: Boolean
     get() = isFunctionTypeOrSubtype() && hasAnnotation(KotlinBuiltIns.FQ_NAMES.extensionFunctionType)
 
 
-/* Borrowed with modifications from MemberCodegen.java */
-
-fun writeInnerClass(innerClass: IrClass, typeMapper: IrTypeMapper, context: JvmBackendContext, v: ClassBuilder) {
-    val outerClassInternalName =
-        if (context.customEnclosingFunction[innerClass.attributeOwnerId] != null) null
-        else innerClass.parent.safeAs<IrClass>()?.let(typeMapper::classInternalName)
-    val innerName = innerClass.name.takeUnless { it.isSpecial }?.asString()
-    val innerClassInternalName = typeMapper.classInternalName(innerClass)
-    v.visitInnerClass(innerClassInternalName, outerClassInternalName, innerName, innerClass.calculateInnerClassAccessFlags(context))
-}
-
 /* Borrowed with modifications from AsmUtil.java */
 
 private val NO_FLAG_LOCAL = 0

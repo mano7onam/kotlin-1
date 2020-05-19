@@ -45,7 +45,7 @@ abstract class ClassCodegen protected constructor(
     val irClass: IrClass,
     val context: JvmBackendContext,
     private val parentFunction: IrFunction?,
-) : InnerClassConsumer {
+) {
     protected val parentClassCodegen = (parentFunction?.parentAsClass ?: irClass.parent as? IrClass)?.let { getOrCreate(it, context) }
     private val withinInline: Boolean = parentClassCodegen?.withinInline == true || parentFunction?.isInline == true
 
@@ -310,9 +310,9 @@ abstract class ClassCodegen protected constructor(
     private fun generateInnerAndOuterClasses() {
         // JVMS7 (4.7.6): a nested class or interface member will have InnerClasses information
         // for each enclosing class and for each immediate member
-        parentClassCodegen?.let { writeInnerClass(irClass, typeMapper, context, it.visitor) }
+        parentClassCodegen?.addInnerClass(irClass)
         for (codegen in generateSequence(this) { it.parentClassCodegen }.takeWhile { it.parentClassCodegen != null }) {
-            writeInnerClass(codegen.irClass, typeMapper, context, visitor)
+            addInnerClass(codegen.irClass)
         }
 
         // JVMS7 (4.7.7): A class must have an EnclosingMethod attribute if and only if
@@ -330,14 +330,13 @@ abstract class ClassCodegen protected constructor(
         }
     }
 
-    override fun addInnerClassInfoFromAnnotation(innerClass: IrClass) {
-        // It's necessary for proper recovering of classId by plain string JVM descriptor when loading annotations
-        // See FileBasedKotlinClass.convertAnnotationVisitor
-        generateSequence<IrDeclaration>(innerClass) { it.parent as? IrDeclaration }.takeWhile { !it.isTopLevelDeclaration }.forEach {
-            if (it is IrClass) {
-                writeInnerClass(it, typeMapper, context, visitor)
-            }
-        }
+    fun addInnerClass(innerClass: IrClass) {
+        val outer =
+            if (context.customEnclosingFunction[innerClass.attributeOwnerId] != null) null
+            else innerClass.parent.safeAs<IrClass>()?.let(typeMapper::classInternalName)
+        val inner = innerClass.name.takeUnless { it.isSpecial }?.asString()
+        val flags = innerClass.calculateInnerClassAccessFlags(context)
+        visitor.visitInnerClass(typeMapper.classInternalName(innerClass), outer, inner, flags)
     }
 }
 
