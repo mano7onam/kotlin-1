@@ -24,7 +24,7 @@ internal class FirContinueExpressionImpl(
     override val annotations: MutableList<FirAnnotationCall>,
     override val target: FirTarget<FirLoop>,
 ) : FirContinueExpression() {
-    override var typeRef: FirTypeRef = FirImplicitNothingTypeRef(source)
+    override var typeRef: FirTypeRef = FirImplicitNothingTypeRef(null)
 
     override fun <R, D> acceptChildren(visitor: FirVisitor<R, D>, data: D) {
         typeRef.accept(visitor, data)
