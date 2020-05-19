@@ -44,9 +44,9 @@ import java.io.File
 abstract class ClassCodegen protected constructor(
     val irClass: IrClass,
     val context: JvmBackendContext,
-    private val parentFunction: IrFunction?,
+    val parentFunction: IrFunction?,
 ) {
-    private val parentClassCodegen = (parentFunction?.parentAsClass ?: irClass.parent as? IrClass)?.let { getOrCreate(it, context) }
+    private val parentClassCodegen = (parentFunction?.parentAsClass ?: irClass.parent as? IrClass)?.let { context.getClassCodegen(it) }
 
     protected val state get() = context.state
     protected val typeMapper get() = context.typeMapper
@@ -125,23 +125,6 @@ abstract class ClassCodegen protected constructor(
         return SMAPAndMethodNode(copy, smap)
     }
 
-    companion object {
-        fun getOrCreate(
-            irClass: IrClass,
-            context: JvmBackendContext,
-            parentFunction: IrFunction? = null,
-        ): ClassCodegen =
-            context.classCodegens.getOrPut(irClass) {
-                context.createCodegen(irClass, context, parentFunction) ?: DescriptorBasedClassCodegen(irClass, context, parentFunction)
-            }.also {
-                assert(parentFunction == null || it.parentFunction == parentFunction) {
-                    "inconsistent parent function for ${irClass.render()}:\n" +
-                            "New: ${parentFunction!!.render()}\n" +
-                            "Old: ${it.parentFunction?.render()}"
-                }
-            }
-    }
-
     protected abstract fun begin(outerState: State?): State
 
     protected abstract inner class State {
@@ -208,7 +191,7 @@ abstract class ClassCodegen protected constructor(
             //    everything moved to the outer class has already been recorded in `globalSerializationBindings`.
             for (declaration in irClass.declarations) {
                 if (declaration is IrClass) {
-                    getOrCreate(declaration, context).begin(this).generate()
+                    context.getClassCodegen(declaration).begin(this).generate()
                 }
             }
 
@@ -282,7 +265,7 @@ abstract class ClassCodegen protected constructor(
                 // Generate a state machine within this method. The continuation class for it should be generated
                 // lazily so that if tail call optimization kicks in, the unused class will not be written to the output.
                 val continuationClass = method.continuationClass() // null for lambdas' invokeSuspend
-                val continuationState = lazy { continuationClass?.let { getOrCreate(it, context, method).begin(null) } ?: this }
+                val continuationState = lazy { continuationClass?.let { context.getClassCodegen(it, method).begin(null) } ?: this }
                 node.acceptWithStateMachine(method, this@ClassCodegen, smapCopyingVisitor) { continuationState.value.visitor }
                 if (continuationClass != null && (continuationState.isInitialized() || method.alwaysNeedsContinuation())) {
                     continuationState.value.generate()
