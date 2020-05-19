@@ -48,153 +48,154 @@ class FirJvmClassCodegen(
     irClass: IrClass,
     context: JvmBackendContext,
     parentFunction: IrFunction?,
-    session: FirSession,
+    private val session: FirSession,
 ) : ClassCodegen(irClass, context, parentFunction) {
-    private val serializerExtension = FirJvmSerializerExtension(session, visitor.serializationBindings, state, irClass, typeMapper)
-    private val serializer: FirElementSerializer? =
-        when (val metadata = irClass.metadata) {
-            is FirMetadataSource.Class -> FirElementSerializer.create(
-                metadata.klass, serializerExtension, (parentClassCodegen as? FirJvmClassCodegen)?.serializer
-            )
-            is FirMetadataSource.File -> FirElementSerializer.createTopLevel(session, serializerExtension)
-            is FirMetadataSource.Function -> FirElementSerializer.createForLambda(session, serializerExtension)
-            else -> null
-        }
+    override fun begin(outerState: ClassCodegen.State?): ClassCodegen.State = State(outerState as? State)
 
-    private val approximator = object : AbstractTypeApproximator(session.inferenceContext) {
-        override fun createErrorType(message: String): SimpleTypeMarker {
-            return ConeKotlinErrorType(message)
-        }
-    }
-
-    private fun FirTypeRef.approximated(
-        toSuper: Boolean,
-        conf: TypeApproximatorConfiguration = TypeApproximatorConfiguration.PublicDeclaration
-    ): FirTypeRef {
-        val approximatedType = if (toSuper)
-            approximator.approximateToSuperType(this.coneTypeUnsafe(), conf)
-        else
-            approximator.approximateToSubType(this.coneTypeUnsafe(), conf)
-        return withReplacedConeType(approximatedType as? ConeKotlinType)
-    }
-
-    private fun FirFunction<*>.copyToFreeAnonymousFunction(): FirAnonymousFunction {
-        val function = this
-        return buildAnonymousFunction {
-            session = function.session
-            origin = FirDeclarationOrigin.Source
-            symbol = FirAnonymousFunctionSymbol()
-            returnTypeRef = function.returnTypeRef.approximated(toSuper = true)
-            receiverTypeRef = function.receiverTypeRef?.approximated(toSuper = false)
-            isLambda = (function as? FirAnonymousFunction)?.isLambda == true
-            valueParameters.addAll(function.valueParameters.map {
-                buildValueParameterCopy(it) {
-                    returnTypeRef = it.returnTypeRef.approximated(toSuper = false)
-                }
-            })
-            typeParameters.addAll(function.typeParameters.filterIsInstance<FirTypeParameter>())
-        }
-    }
-
-    override fun generateKotlinMetadataAnnotation() {
-
-        val localDelegatedProperties = (irClass.attributeOwnerId as? IrClass)?.let(context.localDelegatedProperties::get)
-        if (localDelegatedProperties != null && localDelegatedProperties.isNotEmpty()) {
-            state.bindingTrace.record(
-                CodegenBinding.DELEGATED_PROPERTIES_WITH_METADATA, type, localDelegatedProperties.map { it.descriptor }
-            )
-        }
-
-        // TODO: if `-Xmultifile-parts-inherit` is enabled, write the corresponding flag for parts and facades to [Metadata.extraInt].
-        var extraFlags = JvmAnnotationNames.METADATA_JVM_IR_FLAG
-        if (state.isIrWithStableAbi) {
-            extraFlags += JvmAnnotationNames.METADATA_JVM_IR_STABLE_ABI_FLAG
-        }
-
-        when (val metadata = irClass.metadata) {
-            is FirMetadataSource.Class -> {
-                val classProto = serializer!!.classProto(metadata.klass).build()
-                writeKotlinMetadata(visitor, state, KotlinClassHeader.Kind.CLASS, extraFlags) {
-                    AsmUtil.writeAnnotationData(it, classProto, serializer.stringTable as JvmStringTable)
-                }
-
-                assert(irClass !in context.classNameOverride) {
-                    "JvmPackageName is not supported for classes: ${irClass.render()}"
-                }
+    private inner class State(outerState: State?) : ClassCodegen.State() {
+        private val serializerExtension = FirJvmSerializerExtension(session, visitor.serializationBindings, state, irClass, typeMapper)
+        private val serializer: FirElementSerializer? =
+            when (val metadata = irClass.metadata) {
+                is FirMetadataSource.Class -> FirElementSerializer.create(metadata.klass, serializerExtension, outerState?.serializer)
+                is FirMetadataSource.File -> FirElementSerializer.createTopLevel(session, serializerExtension)
+                is FirMetadataSource.Function -> FirElementSerializer.createForLambda(session, serializerExtension)
+                else -> null
             }
-            is FirMetadataSource.File -> {
-                val packageFqName = irClass.getPackageFragment()!!.fqName
-                val packageProto = serializer!!.packagePartProto(packageFqName, metadata.file)
 
-                serializerExtension.serializeJvmPackage(packageProto, type)
-
-                val facadeClassName = context.multifileFacadeForPart[irClass.attributeOwnerId]
-                val kind = if (facadeClassName != null) KotlinClassHeader.Kind.MULTIFILE_CLASS_PART else KotlinClassHeader.Kind.FILE_FACADE
-                writeKotlinMetadata(visitor, state, kind, extraFlags) { av ->
-                    AsmUtil.writeAnnotationData(av, packageProto.build(), serializer.stringTable as JvmStringTable)
-
-                    if (facadeClassName != null) {
-                        av.visit(JvmAnnotationNames.METADATA_MULTIFILE_CLASS_NAME_FIELD_NAME, facadeClassName.internalName)
-                    }
-
-                    if (irClass in context.classNameOverride) {
-                        av.visit(JvmAnnotationNames.METADATA_PACKAGE_NAME_FIELD_NAME, irClass.fqNameWhenAvailable!!.parent().asString())
-                    }
-                }
+        private val approximator: AbstractTypeApproximator = outerState?.approximator
+            ?: object : AbstractTypeApproximator(session.inferenceContext) {
+                override fun createErrorType(message: String): SimpleTypeMarker = ConeKotlinErrorType(message)
             }
-            is FirMetadataSource.Function -> {
-                val fakeAnonymousFunction = metadata.function.copyToFreeAnonymousFunction()
-                val functionProto = serializer!!.functionProto(fakeAnonymousFunction)?.build()
-                writeKotlinMetadata(visitor, state, KotlinClassHeader.Kind.SYNTHETIC_CLASS, extraFlags) {
-                    if (functionProto != null) {
-                        AsmUtil.writeAnnotationData(it, functionProto, serializer.stringTable as JvmStringTable)
+
+        private fun FirTypeRef.approximated(
+            toSuper: Boolean,
+            conf: TypeApproximatorConfiguration = TypeApproximatorConfiguration.PublicDeclaration
+        ): FirTypeRef {
+            val approximatedType = if (toSuper)
+                approximator.approximateToSuperType(this.coneTypeUnsafe(), conf)
+            else
+                approximator.approximateToSubType(this.coneTypeUnsafe(), conf)
+            return withReplacedConeType(approximatedType as? ConeKotlinType)
+        }
+
+        private fun FirFunction<*>.copyToFreeAnonymousFunction(): FirAnonymousFunction {
+            val function = this
+            return buildAnonymousFunction {
+                session = function.session
+                origin = FirDeclarationOrigin.Source
+                symbol = FirAnonymousFunctionSymbol()
+                returnTypeRef = function.returnTypeRef.approximated(toSuper = true)
+                receiverTypeRef = function.receiverTypeRef?.approximated(toSuper = false)
+                isLambda = (function as? FirAnonymousFunction)?.isLambda == true
+                valueParameters.addAll(function.valueParameters.map {
+                    buildValueParameterCopy(it) {
+                        returnTypeRef = it.returnTypeRef.approximated(toSuper = false)
                     }
-                }
-            }
-            else -> {
-                val entry = irClass.fileParent.fileEntry
-                if (entry is MultifileFacadeFileEntry) {
-                    val partInternalNames = entry.partFiles.mapNotNull { partFile ->
-                        val fileClass = partFile.declarations.singleOrNull { it.isFileClass } as IrClass?
-                        if (fileClass != null) typeMapper.mapClass(fileClass).internalName else null
-                    }
-                    MultifileClassCodegenImpl.writeMetadata(
-                        visitor, state, extraFlags, partInternalNames, type, irClass.fqNameWhenAvailable!!.parent()
-                    )
-                } else {
-                    writeSyntheticClassMetadata(visitor, state)
-                }
+                })
+                typeParameters.addAll(function.typeParameters.filterIsInstance<FirTypeParameter>())
             }
         }
-    }
 
-    override fun bindMethodMetadata(method: IrFunction, signature: Method) {
-        when (val metadata = method.metadata) {
-            is FirMetadataSource.Variable -> {
-                // We can't check for JvmLoweredDeclarationOrigin.SYNTHETIC_METHOD_FOR_PROPERTY_ANNOTATIONS because for interface methods
-                // moved to DefaultImpls, origin is changed to DEFAULT_IMPLS
-                // TODO: fix origin somehow, because otherwise $annotations methods in interfaces also don't have ACC_SYNTHETIC
-                assert(method.name.asString().endsWith(JvmAbi.ANNOTATED_PROPERTY_METHOD_NAME_SUFFIX)) { method.dump() }
-
-                state.globalSerializationBindings.put(
-                    FirJvmSerializerExtension.SYNTHETIC_METHOD_FOR_FIR_VARIABLE, metadata.variable, signature
+        override fun generateKotlinMetadataAnnotation() {
+            val localDelegatedProperties = (irClass.attributeOwnerId as? IrClass)?.let(context.localDelegatedProperties::get)
+            if (localDelegatedProperties != null && localDelegatedProperties.isNotEmpty()) {
+                state.bindingTrace.record(
+                    CodegenBinding.DELEGATED_PROPERTIES_WITH_METADATA, type, localDelegatedProperties.map { it.descriptor }
                 )
             }
-            is FirMetadataSource.Function -> {
-                visitor.serializationBindings.put(FirJvmSerializerExtension.METHOD_FOR_FIR_FUNCTION, metadata.function, signature)
+
+            // TODO: if `-Xmultifile-parts-inherit` is enabled, write the corresponding flag for parts and facades to [Metadata.extraInt].
+            var extraFlags = JvmAnnotationNames.METADATA_JVM_IR_FLAG
+            if (state.isIrWithStableAbi) {
+                extraFlags += JvmAnnotationNames.METADATA_JVM_IR_STABLE_ABI_FLAG
             }
-            null -> {
-            }
-            else -> {
-                error("Incorrect metadata source $metadata for:\n${method.dump()}")
+
+            when (val metadata = irClass.metadata) {
+                is FirMetadataSource.Class -> {
+                    val classProto = serializer!!.classProto(metadata.klass).build()
+                    writeKotlinMetadata(visitor, state, KotlinClassHeader.Kind.CLASS, extraFlags) {
+                        AsmUtil.writeAnnotationData(it, classProto, serializer.stringTable as JvmStringTable)
+                    }
+
+                    assert(irClass !in context.classNameOverride) {
+                        "JvmPackageName is not supported for classes: ${irClass.render()}"
+                    }
+                }
+                is FirMetadataSource.File -> {
+                    val packageFqName = irClass.getPackageFragment()!!.fqName
+                    val packageProto = serializer!!.packagePartProto(packageFqName, metadata.file)
+
+                    serializerExtension.serializeJvmPackage(packageProto, type)
+
+                    val facadeClassName = context.multifileFacadeForPart[irClass.attributeOwnerId]
+                    val kind =
+                        if (facadeClassName != null) KotlinClassHeader.Kind.MULTIFILE_CLASS_PART else KotlinClassHeader.Kind.FILE_FACADE
+                    writeKotlinMetadata(visitor, state, kind, extraFlags) { av ->
+                        AsmUtil.writeAnnotationData(av, packageProto.build(), serializer.stringTable as JvmStringTable)
+
+                        if (facadeClassName != null) {
+                            av.visit(JvmAnnotationNames.METADATA_MULTIFILE_CLASS_NAME_FIELD_NAME, facadeClassName.internalName)
+                        }
+
+                        if (irClass in context.classNameOverride) {
+                            av.visit(JvmAnnotationNames.METADATA_PACKAGE_NAME_FIELD_NAME, irClass.fqNameWhenAvailable!!.parent().asString())
+                        }
+                    }
+                }
+                is FirMetadataSource.Function -> {
+                    val fakeAnonymousFunction = metadata.function.copyToFreeAnonymousFunction()
+                    val functionProto = serializer!!.functionProto(fakeAnonymousFunction)?.build()
+                    writeKotlinMetadata(visitor, state, KotlinClassHeader.Kind.SYNTHETIC_CLASS, extraFlags) {
+                        if (functionProto != null) {
+                            AsmUtil.writeAnnotationData(it, functionProto, serializer.stringTable as JvmStringTable)
+                        }
+                    }
+                }
+                else -> {
+                    val entry = irClass.fileParent.fileEntry
+                    if (entry is MultifileFacadeFileEntry) {
+                        val partInternalNames = entry.partFiles.mapNotNull { partFile ->
+                            val fileClass = partFile.declarations.singleOrNull { it.isFileClass } as IrClass?
+                            if (fileClass != null) typeMapper.mapClass(fileClass).internalName else null
+                        }
+                        MultifileClassCodegenImpl.writeMetadata(
+                            visitor, state, extraFlags, partInternalNames, type, irClass.fqNameWhenAvailable!!.parent()
+                        )
+                    } else {
+                        writeSyntheticClassMetadata(visitor, state)
+                    }
+                }
             }
         }
-    }
 
-    override fun bindFieldMetadata(field: IrField, fieldType: Type, fieldName: String) {
-        val metadata = field.metadata
-        if (metadata is FirMetadataSource.Property) {
-            state.globalSerializationBindings.put(FirJvmSerializerExtension.FIELD_FOR_PROPERTY, metadata.property, fieldType to fieldName)
+        override fun bindMethodMetadata(method: IrFunction, signature: Method) {
+            when (val metadata = method.metadata) {
+                is FirMetadataSource.Variable -> {
+                    // We can't check for JvmLoweredDeclarationOrigin.SYNTHETIC_METHOD_FOR_PROPERTY_ANNOTATIONS because for interface methods
+                    // moved to DefaultImpls, origin is changed to DEFAULT_IMPLS
+                    // TODO: fix origin somehow, because otherwise $annotations methods in interfaces also don't have ACC_SYNTHETIC
+                    assert(method.name.asString().endsWith(JvmAbi.ANNOTATED_PROPERTY_METHOD_NAME_SUFFIX)) { method.dump() }
+
+                    state.globalSerializationBindings.put(
+                        FirJvmSerializerExtension.SYNTHETIC_METHOD_FOR_FIR_VARIABLE, metadata.variable, signature
+                    )
+                }
+                is FirMetadataSource.Function -> {
+                    visitor.serializationBindings.put(FirJvmSerializerExtension.METHOD_FOR_FIR_FUNCTION, metadata.function, signature)
+                }
+                null -> {
+                }
+                else -> {
+                    error("Incorrect metadata source $metadata for:\n${method.dump()}")
+                }
+            }
+        }
+
+        override fun bindFieldMetadata(field: IrField, fieldType: Type, fieldName: String) {
+            val metadata = field.metadata
+            if (metadata is FirMetadataSource.Property) {
+                state.globalSerializationBindings.put(FirJvmSerializerExtension.FIELD_FOR_PROPERTY, metadata.property, fieldType to fieldName)
+            }
         }
     }
 }
