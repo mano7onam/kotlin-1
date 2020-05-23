@@ -524,7 +524,7 @@ fun Fir2IrComponents.createTemporaryVariableForSafeCallConstruction(
     val receiverVariable = declarationStorage.declareTemporaryVariable(receiverExpression, "safe_receiver").apply {
         parent = conversionScope.parentFromStack()
     }
-    val variableSymbol = symbolTable.referenceValue(receiverVariable.descriptor)
+    val variableSymbol = symbolTable.referenceValue(receiverVariable.wrappedDescriptor)
 
     return Pair(receiverVariable, variableSymbol)
 }
