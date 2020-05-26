@@ -10,8 +10,10 @@ import org.jetbrains.kotlin.backend.jvm.JvmLoweredDeclarationOrigin
 import org.jetbrains.kotlin.backend.jvm.lower.MultifileFacadeFileEntry
 import org.jetbrains.kotlin.backend.jvm.lower.buildAssertionsDisabledField
 import org.jetbrains.kotlin.backend.jvm.lower.hasAssertionsDisabledField
+import org.jetbrains.kotlin.builtins.jvm.JavaToKotlinClassMap
 import org.jetbrains.kotlin.codegen.*
 import org.jetbrains.kotlin.codegen.inline.*
+import org.jetbrains.kotlin.codegen.signature.BothSignatureWriter
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.Visibility
@@ -24,9 +26,9 @@ import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionReference
 import org.jetbrains.kotlin.ir.expressions.impl.IrBlockBodyImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrSetFieldImpl
-import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
-import org.jetbrains.kotlin.ir.types.IrSimpleType
+import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.util.*
+import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.resolve.jvm.AsmTypes
 import org.jetbrains.kotlin.resolve.jvm.annotations.JVM_SYNTHETIC_ANNOTATION_FQ_NAME
@@ -41,11 +43,7 @@ import org.jetbrains.org.objectweb.asm.commons.Method
 import org.jetbrains.org.objectweb.asm.tree.MethodNode
 import java.io.File
 
-abstract class ClassCodegen protected constructor(
-    val irClass: IrClass,
-    val context: JvmBackendContext,
-    val parentFunction: IrFunction?,
-) {
+abstract class ClassCodegen(val irClass: IrClass, val context: JvmBackendContext, val parentFunction: IrFunction?) {
     private val parentClassCodegen = (parentFunction?.parentAsClass ?: irClass.parent as? IrClass)?.let { context.getClassCodegen(it) }
 
     protected val state get() = context.state
@@ -56,17 +54,15 @@ abstract class ClassCodegen protected constructor(
     val innerClasses = mutableSetOf<IrClass>()
     val reifiedTypeParametersUsages = ReifiedTypeParametersUsages()
 
-    private val regeneratedObjectNameGenerators = mutableMapOf<String, NameGenerator>()
+    private val regeneratedObjectNameGenerator = NameGenerator(type.internalName)
     private val generatedInlineMethods = mutableMapOf<IrFunction, SMAPAndMethodNode>()
     private var generatingClInit = false
     private var generated = false
 
-    fun getRegeneratedObjectNameGenerator(function: IrFunction): NameGenerator {
-        val name = if (function.name.isSpecial) "special" else function.name.asString()
-        return regeneratedObjectNameGenerators.getOrPut(name) {
-            NameGenerator("${type.internalName}\$$name\$\$inlined")
-        }
-    }
+    fun getRegeneratedObjectNameGenerator(function: IrFunction): NameGenerator =
+        regeneratedObjectNameGenerator.subGenerator(
+            (if (function.name.isSpecial) "special" else function.name.asString()) + "\$\$inlined"
+        )
 
     fun generate() {
         assert(parentFunction != null || parentClassCodegen == null) {
@@ -128,32 +124,18 @@ abstract class ClassCodegen protected constructor(
     protected abstract fun begin(outerState: State?): State
 
     protected abstract inner class State {
-        private val classOrigin = run {
-            // The descriptor associated with an IrClass is never modified in lowerings, so it
-            // doesn't reflect the state of the lowered class. To make the diagnostics work we
-            // pass in a wrapped descriptor instead, except for lambdas where we use the descriptor
-            // of the original function.
-            // TODO: Migrate class builders away from descriptors
-            val descriptor = WrappedClassDescriptor().apply { bind(irClass) }
-            val psiElement = context.psiSourceManager.findPsiElement(irClass)
-            when (irClass.origin) {
-                IrDeclarationOrigin.FILE_CLASS ->
-                    JvmDeclarationOrigin(JvmDeclarationOriginKind.PACKAGE_PART, psiElement, descriptor)
-                JvmLoweredDeclarationOrigin.LAMBDA_IMPL, JvmLoweredDeclarationOrigin.FUNCTION_REFERENCE_IMPL ->
-                    OtherOrigin(psiElement, irClass.attributeOwnerId.safeAs<IrFunctionReference>()?.symbol?.descriptor ?: descriptor)
-                else ->
-                    OtherOrigin(psiElement, descriptor)
-            }
-        }
+        private val classOrigin = irClass.descriptorOrigin
+        private val jvmSignatureClashDetector = JvmSignatureClashDetector(irClass, type, context)
+        private val smap = context.getSourceMapper(irClass)
 
         protected val visitor = state.factory.newVisitor(classOrigin, type, irClass.fileParent.loadSourceFilesInfo(context)).apply {
-            val signature = getSignature(irClass, type, irClass.getSuperClassInfo(typeMapper), typeMapper)
+            val signature = irClass.getSignature(type, typeMapper)
             // Ensure that the backend only produces class names that would be valid in the frontend for JVM.
             if (context.state.classBuilderMode.generateBodies && signature.hasInvalidName()) {
                 throw IllegalStateException("Generating class with invalid name '${type.className}': ${irClass.dump()}")
             }
             defineClass(
-                irClass.psiElement,
+                classOrigin.element,
                 state.classFileVersion,
                 irClass.flags,
                 signature.name,
@@ -162,9 +144,6 @@ abstract class ClassCodegen protected constructor(
                 signature.interfaces.toTypedArray()
             )
         }
-
-        private val jvmSignatureClashDetector = JvmSignatureClashDetector(irClass, type, context)
-        private val smap = context.getSourceMapper(irClass)
 
         fun generate() {
             // Generating a method node may cause the addition of a field with an initializer if an inline function
@@ -204,6 +183,8 @@ abstract class ClassCodegen protected constructor(
 
             generateInnerAndOuterClasses()
 
+            // For compatibility with old versions of the inliner, all objects within inline functions should
+            // have a SMAP, else object regeneration will fail. (Current inliner does not need trivial SMAPs.)
             if (!smap.isTrivial || generateSequence(this@ClassCodegen) { it.parentClassCodegen }.any { it.parentFunction?.isInline == true }) {
                 visitor.visitSMAP(smap, !context.state.languageVersionSettings.supportsFeature(LanguageFeature.CorrectSourceMappingSyntax))
             } else {
@@ -223,7 +204,7 @@ abstract class ClassCodegen protected constructor(
                 else context.methodSignatureMapper.mapFieldSignature(field)
             val fieldName = field.name.asString()
             val fv = visitor.newField(
-                field.OtherOrigin, field.flags, fieldName, fieldType.descriptor,
+                field.descriptorOrigin, field.flags, fieldName, fieldType.descriptor,
                 fieldSignature, (field.initializer?.expression as? IrConst<*>)?.value
             )
 
@@ -255,7 +236,7 @@ abstract class ClassCodegen protected constructor(
                 method.origin == JvmLoweredDeclarationOrigin.FOR_INLINE_STATE_MACHINE_TEMPLATE || method.isEffectivelyInlineOnly(),
                 method.origin == JvmLoweredDeclarationOrigin.FOR_INLINE_STATE_MACHINE_TEMPLATE_CAPTURES_CROSSINLINE
             )
-            val mv = with(node) { visitor.newMethod(method.OtherOrigin, access, name, desc, signature, exceptions.toTypedArray()) }
+            val mv = with(node) { visitor.newMethod(method.descriptorOrigin, access, name, desc, signature, exceptions.toTypedArray()) }
             val smapCopier = SourceMapCopier(smap, methodSMAP)
             val smapCopyingVisitor = object : MethodVisitor(Opcodes.API_VERSION, mv) {
                 override fun visitLineNumber(line: Int, start: Label) =
@@ -315,6 +296,31 @@ abstract class ClassCodegen protected constructor(
 
         abstract fun bindMethodMetadata(method: IrFunction, signature: Method)
     }
+
+    private val IrDeclaration.descriptorOrigin: JvmDeclarationOrigin
+        get() {
+            val kind = if (origin == IrDeclarationOrigin.FILE_CLASS)
+                JvmDeclarationOriginKind.PACKAGE_PART
+            else
+                JvmDeclarationOriginKind.OTHER
+            // TODO: Migrate class builders away from descriptors
+            // For declarations inside lambdas, produce a descriptor which refers back to the original function.
+            // This is needed for plugins which check for lambdas inside of inline functions using the descriptor
+            // contained in JvmDeclarationOrigin. This matches the behavior of the JVM backend.
+            val lambda = when (irClass.origin) {
+                JvmLoweredDeclarationOrigin.FUNCTION_REFERENCE_IMPL,
+                JvmLoweredDeclarationOrigin.SUSPEND_LAMBDA,
+                JvmLoweredDeclarationOrigin.LAMBDA_IMPL -> (irClass.attributeOwnerId as? IrFunctionReference)?.symbol
+                else -> null
+            }
+            // The descriptor associated with an IrClass is never modified in lowerings, so it doesn't reflect
+            // the state of the lowered class. To make the diagnostics work we pass in a wrapped descriptor instead.
+            val wrappedDescriptor = lambda?.descriptor ?: if (this is IrClass && descriptor !is WrappedClassDescriptor)
+                WrappedClassDescriptor().apply { bind(irClass) }
+            else
+                descriptor
+            return JvmDeclarationOrigin(kind, context.psiSourceManager.findPsiElement(this), wrappedDescriptor)
+        }
 }
 
 private fun IrFile.loadSourceFilesInfo(context: JvmBackendContext): List<File> {
@@ -326,7 +332,7 @@ private fun IrFile.loadSourceFilesInfo(context: JvmBackendContext): List<File> {
 }
 
 private fun JvmClassSignature.hasInvalidName() =
-    name.splitToSequence('/').any { identifier -> identifier.any { it in JvmSimpleNameBacktickChecker.INVALID_CHARS } }
+    name.any { it != '/' && it in JvmSimpleNameBacktickChecker.INVALID_CHARS }
 
 private val IrClass.flags: Int
     get() = origin.flags or getVisibilityAccessFlagForClass() or deprecationFlags or when {
@@ -359,32 +365,53 @@ private val Modality.flags: Int
 private val Visibility.flags: Int
     get() = AsmUtil.getVisibilityAccessFlag(this) ?: throw AssertionError("Unsupported visibility $this")
 
-internal val IrDeclaration.OtherOrigin: JvmDeclarationOrigin
-    get() {
-        val klass = (this as? IrClass) ?: parentAsClass
-        return OtherOrigin(
-            // For declarations inside lambdas, produce a descriptor which refers back to the original function.
-            // This is needed for plugins which check for lambdas inside of inline functions using the descriptor
-            // contained in JvmDeclarationOrigin. This matches the behavior of the JVM backend.
-            if (klass.origin == JvmLoweredDeclarationOrigin.LAMBDA_IMPL || klass.origin == JvmLoweredDeclarationOrigin.SUSPEND_LAMBDA) {
-                klass.attributeOwnerId.safeAs<IrFunctionReference>()?.symbol?.descriptor ?: descriptor
-            } else {
-                descriptor
-            }
-        )
-    }
+// Borrowed with modifications from ImplementationBodyCodegen.java
 
-private fun IrClass.getSuperClassInfo(typeMapper: IrTypeMapper): IrSuperClassInfo {
-    if (isInterface) {
-        return IrSuperClassInfo(AsmTypes.OBJECT_TYPE, null)
+private val KOTLIN_MARKER_INTERFACES = mutableMapOf<FqName, String>().apply {
+    for (platformMutabilityMapping in JavaToKotlinClassMap.mutabilityMappings) {
+        this[platformMutabilityMapping.kotlinReadOnly.asSingleFqName()] = "kotlin/jvm/internal/markers/KMappedMarker"
+        this[platformMutabilityMapping.kotlinMutable.asSingleFqName()] =
+            "kotlin/jvm/internal/markers/K" + platformMutabilityMapping.kotlinMutable.relativeClassName.asString()
+                .replace("MutableEntry", "Entry") // kotlin.jvm.internal.markers.KMutableMap.Entry for some reason
+                .replace(".", "$")
     }
+}
 
+private fun IrClass.getSignature(classAsmType: Type, typeMapper: IrTypeMapper): JvmClassSignature {
+    val sw = BothSignatureWriter(BothSignatureWriter.Mode.CLASS)
+
+    typeMapper.writeFormalTypeParameters(typeParameters, sw)
+
+    sw.writeSuperclass()
+    val superClassIrType = superTypes.find { it.classOrNull?.owner?.isJvmInterface == false }
+    val superClassAsmType = if (superClassIrType == null) {
+        sw.writeClassBegin(AsmTypes.OBJECT_TYPE)
+        sw.writeClassEnd()
+        AsmTypes.OBJECT_TYPE
+    } else {
+        typeMapper.mapSupertype(superClassIrType, sw)
+    }
+    sw.writeSuperclassEnd()
+
+    val superInterfaces = LinkedHashSet<String>()
     for (superType in superTypes) {
-        val superClass = superType.safeAs<IrSimpleType>()?.classifier?.safeAs<IrClassSymbol>()?.owner
-        if (superClass != null && !superClass.isJvmInterface) {
-            return IrSuperClassInfo(typeMapper.mapClass(superClass), superType)
+        val superClass = superType.classOrNull?.owner ?: continue
+        if (superClass.isJvmInterface) {
+            sw.writeInterface()
+            superInterfaces.add(typeMapper.mapSupertype(superType, sw).internalName)
+            sw.writeInterfaceEnd()
+            KOTLIN_MARKER_INTERFACES[superClass.fqNameWhenAvailable!!]?.let { kotlinMarkerInterface ->
+                if (superInterfaces.add(kotlinMarkerInterface)) {
+                    sw.writeInterface()
+                    sw.writeAsmType(Type.getObjectType(kotlinMarkerInterface))
+                    sw.writeInterfaceEnd()
+                }
+            }
         }
     }
 
-    return IrSuperClassInfo(AsmTypes.OBJECT_TYPE, null)
+    return JvmClassSignature(
+        classAsmType.internalName, superClassAsmType.internalName,
+        ArrayList(superInterfaces), sw.makeJavaGenericSignature()
+    )
 }
