@@ -43,8 +43,15 @@ class DeclarationsBuilderCache(dimension: Int) {
 
     fun getCachedClasses(fqName: FqName): List<CommonizedClassDescriptor?> = classes.getOrFail(fqName)
 
-    fun getCachedClassifier(fqName: FqName, index: Int): ClassifierDescriptorWithTypeParameters? =
-        classes.getOrNull(fqName)?.get(index) ?: typeAliases.getOrNull(fqName)?.get(index)
+    fun getCachedClassifier(fqName: FqName, index: Int): ClassifierDescriptorWithTypeParameters? {
+        // first, look up through classes
+        val clazz = classes.getOrNull(fqName)?.getWithFallbackToCommon(index)
+        if (clazz != null)
+            return clazz
+
+        // .. then type aliases
+        return typeAliases.getOrNull(fqName)?.getWithFallbackToCommon(index)
+    }
 
     fun cache(index: Int, modules: List<ModuleDescriptorImpl>) {
         this.modules[index] = modules
@@ -93,6 +100,18 @@ class DeclarationsBuilderCache(dimension: Int) {
     companion object {
         private inline fun <reified K, reified V : DeclarationDescriptor> CommonizedGroupMap<K, V>.getOrFail(key: K): List<V?> =
             getOrNull(key)?.toList() ?: error("No cached ${V::class.java} with key $key found")
+
+        private inline fun <reified V : DeclarationDescriptor> CommonizedGroup<V>.getWithFallbackToCommon(index: Int): V? {
+            this[index]?.let { return it }
+
+            val indexOfCommon = size - 1
+            if (index != indexOfCommon) {
+                // second attempt: check if the descriptor is in "common" fragment
+                this[indexOfCommon]?.let { return it }
+            }
+
+            return null
+        }
     }
 }
 
