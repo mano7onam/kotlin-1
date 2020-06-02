@@ -20,7 +20,7 @@ class A {
 
         expectFunction0Unit(x)
         expectFunction0String(<!TYPE_MISMATCH!>x<!>)
-        expectFunction1Unit(<!TYPE_MISMATCH!>x<!>)
+        expectFunction1Unit(<!TYPE_MISMATCH, UNSUPPORTED_FEATURE!>x<!>)
         expectFunction1String(<!TYPE_MISMATCH!>x<!>)
 
         expectFunction0Unit(::foo)
