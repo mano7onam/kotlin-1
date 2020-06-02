@@ -135,6 +135,31 @@ open class LazyClassMemberScope(
     override fun getVariableNames() = _variableNames
     override fun getFunctionNames() = _functionNames
 
+    override fun definitelyDoesNotContainName(name: Name): Boolean {
+        if (name in declarationProvider.getDeclarationNames() ||
+            name in getVariableNames() ||
+            name in getFunctionNames()
+        ) {
+            return false
+        }
+
+        with(c.syntheticResolveExtension) {
+            if (getSyntheticCompanionObjectNameIfNeeded(thisDescriptor) == name ||
+                name in getSyntheticFunctionNames(thisDescriptor) ||
+                name in getSyntheticNestedClassNames(thisDescriptor)
+            ) {
+                return false
+            }
+        }
+
+        if (thisDescriptor.isData && name.identifier.matches(DATA_CLASS_COMPONENT_REGEX)) {
+            // Understanding if this data class really has such member seems to be too expensive
+            return false
+        }
+
+        return true
+    }
+
     private interface MemberExtractor<out T : CallableMemberDescriptor> {
         fun extract(extractFrom: KotlinType, name: Name): Collection<T>
     }
@@ -509,5 +534,7 @@ open class LazyClassMemberScope(
                 return extractFrom.memberScope.getContributedVariables(name, NoLookupLocation.FOR_ALREADY_TRACKED)
             }
         }
+
+        private val DATA_CLASS_COMPONENT_REGEX = Regex("component[1-9][0-9]*")
     }
 }
