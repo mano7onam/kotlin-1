@@ -568,6 +568,7 @@
     <typedHandler implementation="org.jetbrains.kotlin.idea.editor.KotlinTypedHandler"/>
     <typedHandler implementation="org.jetbrains.kotlin.idea.kdoc.KDocTypedHandler"/>
     <typedHandler implementation="org.jetbrains.kotlin.idea.editor.KotlinRawStringTypedHandler"/>
+    <enterBetweenBracesDelegate language="kotlin" implementationClass="org.jetbrains.kotlin.idea.editor.EnterBetweenBracesAndBracketsNoCommitDelegate"/>
     <enterHandlerDelegate implementation="org.jetbrains.kotlin.idea.editor.KotlinEnterHandler"
                           id="KotlinEnterHandler" order="before EnterBetweenBracesHandler"/>
     <enterHandlerDelegate implementation="org.jetbrains.kotlin.idea.editor.KotlinMultilineStringEnterHandler"
