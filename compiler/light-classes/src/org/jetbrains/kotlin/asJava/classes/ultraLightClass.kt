@@ -36,11 +36,10 @@ import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.resolve.DelegationResolver
 import org.jetbrains.kotlin.resolve.DescriptorToSourceUtils
 import org.jetbrains.kotlin.resolve.annotations.JVM_STATIC_ANNOTATION_FQ_NAME
-import org.jetbrains.kotlin.resolve.annotations.argumentValue
-import org.jetbrains.kotlin.resolve.constants.EnumValue
 import org.jetbrains.kotlin.resolve.jvm.annotations.JVM_OVERLOADS_FQ_NAME
 import org.jetbrains.kotlin.types.KotlinType
 import org.jetbrains.kotlin.types.typeUtil.isAnyOrNullableAny
+import java.util.concurrent.ConcurrentHashMap
 
 open class KtUltraLightClass(classOrObject: KtClassOrObject, internal val support: KtUltraLightSupport) :
     KtLightClassImpl(classOrObject) {
@@ -265,24 +264,11 @@ open class KtUltraLightClass(classOrObject: KtClassOrObject, internal val suppor
 
         for (declaration in this.classOrObject.declarations.filterNot { it.isHiddenByDeprecation(support) }) {
             if (declaration.hasModifier(PRIVATE_KEYWORD) && isInterface) continue
-            when (declaration) {
-                is KtNamedFunction -> result.addAll(membersBuilder.createMethods(declaration, forceStatic = false))
-                is KtProperty -> result.addAll(
-                    membersBuilder.propertyAccessors(declaration, declaration.isVar, forceStatic = false, onlyJvmStatic = false)
-                )
-            }
+            getAccessors(declaration)?.let { result.addAll(it) }
         }
 
         for (parameter in propertyParameters()) {
-            result.addAll(
-                membersBuilder.propertyAccessors(
-                    parameter,
-                    parameter.isMutable,
-                    forceStatic = false,
-                    onlyJvmStatic = false,
-                    createAsAnnotationMethod = isAnnotationType
-                )
-            )
+            getAccessors(parameter)?.let { result.addAll(it) }
         }
 
         if (!isInterface) {
@@ -290,19 +276,8 @@ open class KtUltraLightClass(classOrObject: KtClassOrObject, internal val suppor
         }
 
         this.classOrObject.companionObjects.firstOrNull()?.let { companion ->
-            for (declaration in companion.declarations.filterNot { isHiddenByDeprecation(it) }) {
-                when (declaration) {
-                    is KtNamedFunction ->
-                        if (isJvmStatic(declaration)) result.addAll(membersBuilder.createMethods(declaration, forceStatic = true))
-                    is KtProperty -> result.addAll(
-                        membersBuilder.propertyAccessors(
-                            declaration,
-                            declaration.isVar,
-                            forceStatic = false,
-                            onlyJvmStatic = true
-                        )
-                    )
-                }
+            for (declaration in companion.declarations.filterNot { it.isHiddenByDeprecation(support) }) {
+                getAccessors(declaration)?.let { result.addAll(it) }
             }
         }
 
@@ -400,7 +375,7 @@ open class KtUltraLightClass(classOrObject: KtClassOrObject, internal val suppor
         if (constructors.isEmpty()) {
             result.add(defaultConstructor())
         }
-        for (constructor in constructors.filterNot { isHiddenByDeprecation(it) }) {
+        for (constructor in constructors.filterNot { it.isHiddenByDeprecation(support) }) {
             result.addAll(membersBuilder.createMethods(constructor, false, forcePrivate = isEnum))
         }
         val primary = classOrObject.primaryConstructor
@@ -443,16 +418,11 @@ open class KtUltraLightClass(classOrObject: KtClassOrObject, internal val suppor
             methodIndex
         )
 
-    private fun isHiddenByDeprecation(declaration: KtDeclaration): Boolean {
-        val deprecated = support.findAnnotation(declaration, FqName("kotlin.Deprecated"))?.second
-        return (deprecated?.argumentValue("level") as? EnumValue)?.enumEntryName?.asString() == "HIDDEN"
-    }
-
     private fun isJvmStatic(declaration: KtAnnotated): Boolean = declaration.hasAnnotation(JVM_STATIC_ANNOTATION_FQ_NAME)
 
     override fun getOwnMethods(): List<KtLightMethod> = _ownMethods.value
 
-    private fun KtAnnotated.hasAnnotation(name: FqName) = support.findAnnotation(this, name) != null
+    private fun KtAnnotated.hasAnnotation(name: FqName) = support.findAnnotation(this, name) !== null
 
     private fun KtCallableDeclaration.isConstOrJvmField() =
         hasModifier(CONST_KEYWORD) || isJvmField()
@@ -492,4 +462,57 @@ open class KtUltraLightClass(classOrObject: KtClassOrObject, internal val suppor
 
         return super.getTextRange()
     }
+
+    private val _accessors = ConcurrentHashMap<KtDeclaration, Collection<KtLightMethod>>()
+
+    fun getAccessors(declaration: KtDeclaration): Collection<KtLightMethod>? =
+        _accessors.getOrPut(declaration) {
+            if (declaration.isHiddenByDeprecation(support))
+                return null
+
+            val (isFromCompanion, isInline) = classOrObject.declarationKind(declaration) ?: return null
+
+            val result = when (declaration) {
+                is KtNamedFunction -> if (isFromCompanion && isJvmStatic(declaration))
+                    membersBuilder.createMethods(declaration, forceStatic = true)
+                else
+                    membersBuilder.createMethods(declaration, forceStatic = false)
+                is KtProperty ->
+                    membersBuilder.propertyAccessors(
+                        declaration,
+                        declaration.isVar,
+                        forceStatic = false,
+                        onlyJvmStatic = isFromCompanion
+                    )
+                is KtParameter -> if (isInline)
+                    membersBuilder.propertyAccessors(
+                        declaration,
+                        mutable = false,
+                        forceStatic = false,
+                        onlyJvmStatic = false
+                    )
+                else
+                    membersBuilder.propertyAccessors(
+                        declaration,
+                        declaration.isMutable,
+                        forceStatic = false,
+                        onlyJvmStatic = false,
+                        createAsAnnotationMethod = isAnnotationType
+                    )
+                else -> null
+            }
+            result
+        }
+}
+
+/**
+ * Checks if declaration found in companion or not. If the declaration isn't found then null.
+ */
+fun KtClassOrObject.declarationKind(declaration: KtDeclaration): Pair<Boolean, Boolean>? {
+    val isInline = primaryConstructorParameters.contains(declaration)
+    val fromCompanion = companionObjects.firstOrNull()?.declarations?.contains(declaration) ?: false
+    val inDeclaration = declarations.contains(declaration)
+    if (!isInline && !fromCompanion && !inDeclaration)
+        return null
+    return Pair(fromCompanion, isInline)
 }
