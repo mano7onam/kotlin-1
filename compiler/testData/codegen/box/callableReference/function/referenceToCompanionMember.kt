@@ -1,5 +1,6 @@
 // WITH_RUNTIME
 // IGNORE_BACKEND_FIR: JVM_IR
+// IGNORE_BACKEND: JS
 
 class A {
     companion object {
