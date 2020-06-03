@@ -11,7 +11,9 @@ import org.jetbrains.kotlin.resolve.calls.inference.model.LowerPriorityToPreserv
 import org.jetbrains.kotlin.resolve.calls.model.KotlinCallArgument
 import org.jetbrains.kotlin.resolve.calls.model.KotlinResolutionCandidate
 import org.jetbrains.kotlin.resolve.calls.model.SimpleKotlinCallArgument
+import org.jetbrains.kotlin.types.KotlinType
 import org.jetbrains.kotlin.types.UnwrappedType
+import org.jetbrains.kotlin.types.isDynamic
 import org.jetbrains.kotlin.types.typeUtil.isUnit
 
 object UnitTypeConversions : ParameterTypeConversion {
@@ -24,13 +26,18 @@ object UnitTypeConversions : ParameterTypeConversion {
         if (argument !is SimpleKotlinCallArgument) return true
 
         val argumentType = argument.receiver.stableType
-        if (argumentType.isBuiltinFunctionalType && argumentType.getReturnTypeFromFunctionType().isUnit()) return true
-        if (argumentType.isKFunctionType && argument.receiver.stableType.arguments.last().type.isUnit()) return true
+        if (argumentType.isBuiltinFunctionalType && argumentType.getReturnTypeFromFunctionType().isUnitOrDynamic()) return true
+        if (argumentType.isKFunctionType && argument.receiver.stableType.arguments.last().type.isUnitOrDynamic()) return true
 
-        if (!expectedParameterType.isBuiltinFunctionalType || !expectedParameterType.getReturnTypeFromFunctionType().isUnit()) return true
+        if (
+            !expectedParameterType.isBuiltinFunctionalType ||
+            !expectedParameterType.getReturnTypeFromFunctionType().isUnitOrDynamic()
+        ) return true
 
         return false
     }
+
+    private fun KotlinType.isUnitOrDynamic(): Boolean = isUnit() || isDynamic()
 
     override fun conversionIsNeededBeforeSubtypingCheck(argument: KotlinCallArgument): Boolean =
         argument is SimpleKotlinCallArgument && argument.receiver.stableType.isFunctionType
