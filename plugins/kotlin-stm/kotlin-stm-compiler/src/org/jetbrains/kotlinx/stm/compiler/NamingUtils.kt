@@ -24,15 +24,15 @@ internal val SEARCH_JS_STM_METHOD = Name.identifier("findJsSTM")
 internal val SEARCH_NATIVE_STM_METHOD = Name.identifier("findNativeSTM")
 internal val DEFAULT_SUFFIX = Name.identifier("Default")
 
-internal val GET_CONTEXT = Name.identifier("getContext")
+internal val GET_CONTEXT = "getContext"
 
-internal val WRAP_METHOD = Name.identifier("wrap")
+internal val WRAP_METHOD = "wrap"
 
-internal val GET_VAR_METHOD = Name.identifier("getVar")
+internal val GET_VAR_METHOD = "getVar"
 
-internal val SET_VAR_METHOD = Name.identifier("setVar")
+internal val SET_VAR_METHOD = "setVar"
 
-internal val RUN_ATOMICALLY_METHOD = Name.identifier("runAtomically")
+internal val RUN_ATOMICALLY_METHOD = "runAtomically"
 
 internal val RUN_ATOMICALLY_GLOBAL_FUNCTION = Name.identifier("runAtomically")
 

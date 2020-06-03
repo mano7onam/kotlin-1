@@ -10,7 +10,6 @@ import org.jetbrains.kotlin.cli.jvm.config.JvmClasspathRoot
 import org.jetbrains.kotlin.codegen.AbstractAsmLikeInstructionListingTest
 import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.config.JVMConfigurationKeys
-import org.jetbrains.kotlin.js.config.JSConfigurationKeys
 import org.jetbrains.kotlin.utils.PathUtil
 import org.jetbrains.kotlinx.stm.compiler.extensions.StmComponentRegistrar
 import java.io.File
@@ -26,7 +25,7 @@ abstract class AbstractStmIrBytecodeListingTest : AbstractAsmLikeInstructionList
 
     override fun setupEnvironment(environment: KotlinCoreEnvironment) {
         StmComponentRegistrar.registerExtensions(environment.project)
-        val t = PathUtil.getResourcePathForClass(Class.forName("kotlinx.stm.SharedMutable"))
-        environment.updateClasspath(listOf(JvmClasspathRoot(t)))
+        val sharedMutablePath = PathUtil.getResourcePathForClass(Class.forName("kotlinx.stm.SharedMutable"))
+        environment.updateClasspath(listOf(JvmClasspathRoot(sharedMutablePath)))
     }
 }

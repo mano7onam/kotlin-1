@@ -8,22 +8,18 @@ package org.jetbrains.kotlinx.stm.compiler.extensions
 import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.pop
-import org.jetbrains.kotlin.descriptors.ClassDescriptor
-import org.jetbrains.kotlin.descriptors.FunctionDescriptor
-import org.jetbrains.kotlin.descriptors.PropertyAccessorDescriptor
 import org.jetbrains.kotlin.ir.IrStatement
-import org.jetbrains.kotlin.ir.declarations.IrClass
-import org.jetbrains.kotlin.ir.declarations.IrFunction
-import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
-import org.jetbrains.kotlin.ir.declarations.IrValueParameter
+import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.util.hasAnnotation
+import org.jetbrains.kotlin.ir.util.isAccessor
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
+import org.jetbrains.kotlin.utils.addToStdlib.safeAs
 import org.jetbrains.kotlinx.stm.compiler.ATOMIC_FUNCTION_ANNOTATION
 import org.jetbrains.kotlinx.stm.compiler.RUN_ATOMICALLY_METHOD
 import org.jetbrains.kotlinx.stm.compiler.SHARED_MUTABLE_ANNOTATION
@@ -31,13 +27,15 @@ import org.jetbrains.kotlinx.stm.compiler.TEMPORARY_IR_FUNCTION_ANNOTATION
 import org.jetbrains.kotlinx.stm.compiler.backend.ir.StmIrGenerator
 
 private fun IrFunction.isAtomicFunction() = this.annotations.hasAnnotation(ATOMIC_FUNCTION_ANNOTATION)
-private fun FunctionDescriptor.isAtomicFunction() = this.annotations.hasAnnotation(ATOMIC_FUNCTION_ANNOTATION)
+private fun IrFunctionSymbol.isAtomicFunction() = this.owner.isAtomicFunction()
 
-private fun FunctionDescriptor.isRunAtomically() = this.annotations.hasAnnotation(TEMPORARY_IR_FUNCTION_ANNOTATION)
-        && this.name == RUN_ATOMICALLY_METHOD
+private fun IrFunction.isRunAtomically() = this.annotations.hasAnnotation(TEMPORARY_IR_FUNCTION_ANNOTATION)
+        && this.name.asString() == RUN_ATOMICALLY_METHOD
 
 private fun IrClass.isSharedClass() = this.annotations.hasAnnotation(SHARED_MUTABLE_ANNOTATION)
-private fun ClassDescriptor.isSharedClass() = this.annotations.hasAnnotation(SHARED_MUTABLE_ANNOTATION)
+
+val IrFunction.correspondingProperty: IrProperty?
+    get() = this.safeAs<IrSimpleFunction>()?.correspondingPropertySymbol?.owner
 
 internal typealias FunctionTransformMap = MutableMap<IrFunctionSymbol, IrFunction>
 
@@ -49,8 +47,7 @@ private class StmSharedClassLowering(
         if (declaration.isSharedClass())
             StmIrGenerator.patchSharedClass(
                 declaration,
-                pluginContext,
-                pluginContext.symbolTable
+                pluginContext
             )
 
         declaration.transformChildrenVoid()
@@ -68,7 +65,7 @@ private class StmAtomicFunctionLowering(
 
     override fun visitFunction(declaration: IrFunction): IrStatement {
         val result = if (declaration.isAtomicFunction())
-            StmIrGenerator.patchFunction(declaration, pluginContext.symbolTable, argumentMap).also {
+            StmIrGenerator.patchFunction(declaration, pluginContext, argumentMap).also {
                 resultMap[declaration.symbol] = it
             }
         else
@@ -105,18 +102,16 @@ private class StmCallLowering(
     override fun visitCall(expression: IrCall): IrExpression {
         expression.transformChildrenVoid(this)
 
-        val callee = expression.symbol.descriptor
-        val containingDecl = callee.containingDeclaration
+        val callee = expression.symbol.owner
+        val containingDecl = callee.parent
 
         return when {
-            containingDecl is ClassDescriptor
+            containingDecl is IrClass
                     && containingDecl.isSharedClass()
-                    && callee is PropertyAccessorDescriptor -> StmIrGenerator.patchPropertyAccess(
+                    && callee.isAccessor -> StmIrGenerator.patchPropertyAccess(
                 expression,
                 callee,
-                functionStack,
-                pluginContext.symbolTable,
-                pluginContext
+                functionStack
             )
             callee.isAtomicFunction() -> StmIrGenerator.patchAtomicFunctionCall(
                 expression,
