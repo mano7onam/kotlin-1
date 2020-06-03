@@ -915,6 +915,7 @@ signing {
 
 val zipCompilerWithSignature by secureZipTask(zipCompiler)
 val zipPluginWithSignature by secureZipTask(zipPlugin)
+val zipTestDataWithSignature by secureZipTask(zipTestData)
 
 configure<IdeaModel> {
     module {
