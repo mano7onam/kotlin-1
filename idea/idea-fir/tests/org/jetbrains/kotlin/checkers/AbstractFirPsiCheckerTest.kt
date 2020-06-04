@@ -18,7 +18,6 @@ abstract class AbstractFirPsiCheckerTest : AbstractPsiCheckerTest() {
 
     override fun setUp() {
         super.setUp()
-        FirResolution.enabled = true
     }
 
     override fun doTest(filePath: String) {
@@ -49,7 +48,6 @@ abstract class AbstractFirPsiCheckerTest : AbstractPsiCheckerTest() {
     }
 
     override fun tearDown() {
-        FirResolution.enabled = false
         super.tearDown()
     }
 }
