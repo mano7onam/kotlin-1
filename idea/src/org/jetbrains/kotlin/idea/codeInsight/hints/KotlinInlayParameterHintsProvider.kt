@@ -32,18 +32,15 @@ class KotlinInlayParameterHintsProvider : InlayParameterHintsProvider {
         )
 
     override fun getHintInfo(element: PsiElement): HintInfo? {
-        return when (val hintType = HintType.resolve(element) ?: return null) {
-            HintType.PARAMETER_HINT -> {
-                val parent = (element as? KtValueArgumentList)?.parent
-                (parent as? KtCallElement)?.let { getMethodInfo(it) }
-            }
-            else -> HintInfo.OptionInfo(hintType.option)
-        }
+        if (!(HintType.PARAMETER_HINT.isApplicable(element))) return null
+        val parent: PsiElement = (element as? KtValueArgumentList)?.parent ?: return null
+        return getMethodInfo(parent as KtCallElement)
     }
 
     override fun getParameterHints(element: PsiElement): List<InlayInfo> {
-        val resolveToEnabled = HintType.resolveToEnabled(element) ?: return emptyList()
-        return resolveToEnabled.provideHints(element)
+        return if (HintType.PARAMETER_HINT.isApplicable(element))
+            HintType.PARAMETER_HINT.provideHints(element)
+        else emptyList()
     }
 
     override fun getBlackListDependencyLanguage(): Language = JavaLanguage.INSTANCE

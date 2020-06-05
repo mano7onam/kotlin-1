@@ -14,18 +14,10 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
-import com.intellij.psi.SyntaxTraverser
 import org.jetbrains.kotlin.idea.KotlinLanguage
-import org.jetbrains.kotlin.idea.codeInsight.hints.HintType
-import org.jetbrains.kotlin.idea.parameterInfo.TYPE_INFO_PREFIX
-import org.jetbrains.kotlin.idea.parameterInfo.provideLambdaReturnValueHints
-import org.jetbrains.kotlin.psi.KtExpression
-import java.util.*
 
 class KotlinCodeHintsPass(private val myRootElement: PsiElement, editor: Editor) :
     EditorBoundHighlightingPass(editor, myRootElement.containingFile, true) {
-
-    private val myTraverser: SyntaxTraverser<PsiElement> = SyntaxTraverser.psiTraverser(myRootElement)
 
     override fun doCollectInformation(progress: ProgressIndicator) {
         if (myFile.language != KotlinLanguage.INSTANCE) return
@@ -37,27 +29,6 @@ class KotlinCodeHintsPass(private val myRootElement: PsiElement, editor: Editor)
         if (provider == null || !provider.canShowHintsWhenDisabled() && !isEnabled || DiffUtil.isDiffEditor(myEditor)) {
             kotlinCodeHintsModel.removeAll(myDocument)
             return
-        }
-
-        if (HintType.LAMBDA_RETURN_EXPRESSION.enabled) {
-            val actualHints = HashMap<PsiElement, String>()
-            myTraverser.forEach { element -> processLambdaReturnHints(element, actualHints) }
-
-            kotlinCodeHintsModel.update(myDocument, actualHints)
-        } else {
-            kotlinCodeHintsModel.removeAll(myDocument)
-        }
-    }
-
-    private fun processLambdaReturnHints(element: PsiElement, actualElements: MutableMap<PsiElement, String>) {
-        if (element !is KtExpression) return
-
-        for (returnHint in provideLambdaReturnValueHints(element)) {
-            val offset = returnHint.offset
-
-            if (!canShowHintsAtOffset(offset)) continue
-
-            actualElements[element] = returnHint.text.substringAfter(TYPE_INFO_PREFIX)
         }
     }
 

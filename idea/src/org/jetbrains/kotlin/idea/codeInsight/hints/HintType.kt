@@ -103,14 +103,24 @@ enum class HintType(private val showDesc: String, val doNotShowDesc: String, def
             elem is KtExpression && elem !is KtFunctionLiteral && !elem.isNameReferenceInCall()
 
         override fun provideHints(elem: PsiElement): List<InlayInfo> {
-            // Will be painted with ReturnHintLinePainter
-
-            // Enable/Disable setting will be present in the list with other hints.
-            // Enable action will be provided by the platform.
-            // Disable action need to be reimplemented as hints are not actually added, see DisableReturnLambdaHintOptionAction.
-
-            return emptyList()
+            if (elem !is KtExpression) return emptyList()
+            return provideLambdaReturnValueHints(elem)/*.filter { inlayInfo -> inlayInfo.offset }*/ //todo: org.jetbrains.kotlin.idea.parameterInfo.custom.KotlinCodeHintsPass.canShowHintsAtOffset
         }
+
+/*
+        private fun canShowHintsAtOffset(offset: Int, myRootElement: PsiElement): Boolean {
+            val rootRange = myRootElement.textRange
+
+            if (rootRange.startOffset < offset && offset < rootRange.endOffset) {
+                return true
+            }
+
+            return myDocument != null && myDocument.textLength == rootRange.length
+        }
+*/
+
+
+
     },
 
     LAMBDA_IMPLICIT_PARAMETER_RECEIVER(
