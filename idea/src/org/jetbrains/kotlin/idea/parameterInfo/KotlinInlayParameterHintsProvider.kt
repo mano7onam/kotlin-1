@@ -173,7 +173,7 @@ enum class HintType(val showDesc: String, val doNotShowDesc: String, defaultEnab
 @Suppress("UnstableApiUsage")
 class KotlinInlayParameterHintsProvider : InlayParameterHintsProvider {
 
-    override fun getSupportedOptions(): List<Option> = HintType.values().map { it.option }
+    override fun getSupportedOptions(): List<Option> = listOf(HintType.PARAMETER_HINT.option)
 
     override fun getDefaultBlackList(): Set<String> =
         setOf(
