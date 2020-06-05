@@ -6,17 +6,8 @@
 package org.jetbrains.kotlin.idea.codeInsight.hints
 
 import com.intellij.codeInsight.hints.*
-import com.intellij.codeInsight.hints.presentation.InlayPresentation
-import com.intellij.codeInsight.hints.presentation.InsetPresentation
-import com.intellij.codeInsight.hints.presentation.MenuOnClickPresentation
-import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.project.Project
-import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiFile
 import com.intellij.ui.layout.panel
 import org.jetbrains.kotlin.idea.KotlinBundle
-import org.jetbrains.kotlin.idea.parameterInfo.HintType
-import org.jetbrains.kotlin.idea.parameterInfo.TYPE_INFO_PREFIX
 import javax.swing.JComponent
 
 // todo: menu doesn't yet work

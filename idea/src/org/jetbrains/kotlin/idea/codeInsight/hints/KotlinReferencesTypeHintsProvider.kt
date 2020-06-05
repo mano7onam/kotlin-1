@@ -9,7 +9,6 @@ import com.intellij.codeInsight.hints.ChangeListener
 import com.intellij.codeInsight.hints.ImmediateConfigurable
 import com.intellij.ui.layout.panel
 import org.jetbrains.kotlin.idea.KotlinBundle
-import org.jetbrains.kotlin.idea.parameterInfo.HintType
 import javax.swing.JComponent
 
 @Suppress("UnstableApiUsage")

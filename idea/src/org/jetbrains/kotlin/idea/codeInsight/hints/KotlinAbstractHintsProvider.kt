@@ -13,7 +13,6 @@ import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
-import org.jetbrains.kotlin.idea.parameterInfo.HintType
 import org.jetbrains.kotlin.idea.parameterInfo.TYPE_INFO_PREFIX
 
 @Suppress("UnstableApiUsage")

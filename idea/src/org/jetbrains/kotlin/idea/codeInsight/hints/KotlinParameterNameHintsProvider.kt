@@ -15,7 +15,6 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.ui.layout.panel
 import org.jetbrains.kotlin.idea.KotlinBundle
-import org.jetbrains.kotlin.idea.parameterInfo.HintType
 import org.jetbrains.kotlin.idea.parameterInfo.TYPE_INFO_PREFIX
 import javax.swing.JComponent
 
