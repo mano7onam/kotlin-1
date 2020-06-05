@@ -28,6 +28,7 @@ import org.jetbrains.kotlin.fir.symbols.Fir2IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.fir.symbols.FirBasedSymbol
 import org.jetbrains.kotlin.fir.symbols.impl.*
 import org.jetbrains.kotlin.fir.types.*
+import org.jetbrains.kotlin.ir.DescriptorBasedIr
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.declarations.impl.*
@@ -46,6 +47,7 @@ import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.serialization.deserialization.descriptors.DeserializedContainerSource
 
+@OptIn(DescriptorBasedIr::class)
 class Fir2IrDeclarationStorage(
     private val components: Fir2IrComponents,
     private val moduleDescriptor: FirModuleDescriptor,
@@ -476,7 +478,7 @@ class Fir2IrDeclarationStorage(
                     isFakeOverride = updatedOrigin == IrDeclarationOrigin.FAKE_OVERRIDE,
                     isOperator = simpleFunction?.isOperator == true
                 ).apply {
-                    metadata = FirMetadataSource.Function(function, descriptor)
+                    metadata = FirMetadataSource.Function(function)
                     enterScope(this)
                     bindAndDeclareParameters(
                         function, irParent,
@@ -545,7 +547,7 @@ class Fir2IrDeclarationStorage(
                     constructor.returnTypeRef.toIrType(),
                     isInline = false, isExternal = false, isPrimary = isPrimary, isExpect = false
                 ).apply {
-                    metadata = FirMetadataSource.Function(constructor, descriptor)
+                    metadata = FirMetadataSource.Function(constructor)
                     enterScope(this)
                     bindAndDeclareParameters(constructor, irParent, isStatic = false)
                     leaveScope(this)
@@ -601,7 +603,7 @@ class Fir2IrDeclarationStorage(
                 isOperator = false
             ).apply {
                 if (propertyAccessor != null) {
-                    metadata = FirMetadataSource.Function(propertyAccessor, descriptor)
+                    metadata = FirMetadataSource.Function(propertyAccessor)
                 }
                 with(classifierStorage) {
                     setTypeParameters(

@@ -14,10 +14,7 @@ import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.descriptors.*
 import org.jetbrains.kotlin.descriptors.impl.EmptyPackageFragmentDescriptor
 import org.jetbrains.kotlin.incremental.components.NoLookupLocation
-import org.jetbrains.kotlin.ir.IrElement
-import org.jetbrains.kotlin.ir.SourceManager
-import org.jetbrains.kotlin.ir.SourceRangeInfo
-import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
+import org.jetbrains.kotlin.ir.*
 import org.jetbrains.kotlin.ir.backend.js.ir.JsIrBuilder
 import org.jetbrains.kotlin.ir.backend.js.utils.OperatorNames
 import org.jetbrains.kotlin.ir.declarations.*
@@ -60,9 +57,12 @@ class JsIrBackendContext(
 
     val externalPackageFragment = mutableMapOf<IrFileSymbol, IrFile>()
     val externalDeclarations = hashSetOf<IrDeclaration>()
+
+    @OptIn(DescriptorBasedIr::class)
     val bodilessBuiltInsPackageFragment: IrPackageFragment = run {
 
         class DescriptorlessExternalPackageFragmentSymbol : IrExternalPackageFragmentSymbol {
+
             override val descriptor: PackageFragmentDescriptor
                 get() = error("Operation is unsupported")
 
