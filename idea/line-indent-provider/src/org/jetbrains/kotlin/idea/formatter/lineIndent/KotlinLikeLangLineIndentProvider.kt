@@ -15,6 +15,7 @@ import com.intellij.psi.impl.source.codeStyle.lineIndent.IndentCalculator
 import com.intellij.psi.impl.source.codeStyle.lineIndent.JavaLikeLangLineIndentProvider
 import com.intellij.psi.impl.source.codeStyle.lineIndent.JavaLikeLangLineIndentProvider.JavaLikeElement.*
 import com.intellij.psi.tree.IElementType
+import com.intellij.util.text.CharArrayUtil
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.idea.formatter.lineIndent.KotlinLikeLangLineIndentProvider.KotlinElement.*
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -56,6 +57,7 @@ abstract class KotlinLikeLangLineIndentProvider : JavaLikeLangLineIndentProvider
 
     override fun getIndent(project: Project, editor: Editor, language: Language?, offset: Int): IndentCalculator? {
         val factory = IndentCalculatorFactory(project, editor)
+        val settings = indentionSettings(project)
         val currentPosition = getPosition(editor, offset)
         if (!currentPosition.matchesRule { it.isAt(Whitespace) && it.isAtMultiline }) return null
 
@@ -85,6 +87,13 @@ abstract class KotlinLikeLangLineIndentProvider : JavaLikeLangLineIndentProvider
                 after.moveBeforeParentheses(TemplateEntryOpen, TemplateEntryClose)
                 return factory.createIndentCalculator(indent, after.startOffset)
             }
+
+            before.isAt(LeftParenthesis) && after.isAt(RightParenthesis) -> {
+                val indentInParenthesis = createIndentForParenthesis(before, currentPosition, after, offset, settings)
+                if (indentInParenthesis != null) {
+                    return factory.createIndentCalculator(indentInParenthesis, before.startOffset)
+                }
+            }
         }
 
         return before.controlFlowStatementBefore()?.let { controlFlowKeywordPosition ->
@@ -97,6 +106,44 @@ abstract class KotlinLikeLangLineIndentProvider : JavaLikeLangLineIndentProvider
 
             factory.createIndentCalculator(indent, IndentCalculator.LINE_BEFORE)
         }
+    }
+
+    private fun createIndentForParenthesis(
+        before: SemanticEditorPosition,
+        currentPosition: SemanticEditorPosition,
+        after: SemanticEditorPosition,
+        offset: Int,
+        settings: KotlinIndentationAdjuster,
+    ): Indent? {
+        assert(before.isAt(LeftParenthesis))
+        assert(after.isAt(RightParenthesis))
+
+        // case only for caret before
+        if (!currentPosition.hasLineBreaksAfter(offset)) with(before.copy()) {
+            moveBeforeIgnoringWhiteSpaceOrComment()
+            moveBeforeTypeListIfPossible()
+            val indent = when {
+                isAt(Identifier) || isAt(KtTokens.FUN_KEYWORD) || isAt(KtTokens.DOT) -> {
+                    if (settings.alignWhenMultilineFunctionParentheses)
+                        createAlignMultilineIndent(before)
+                    else
+                        Indent.getNoneIndent()
+                }
+
+                isControlFlowKeyword() -> Indent.getNoneIndent()
+                else -> null
+            }
+
+            return indent
+        }
+
+        return null
+    }
+
+    private fun createAlignMultilineIndent(position: SemanticEditorPosition): Indent {
+        val beforeLineStart = CharArrayUtil.shiftBackwardUntil(position.chars, position.startOffset, "\n") + 1
+        val beforeLineWithoutIndentStart = CharArrayUtil.shiftForward(position.chars, beforeLineStart, " \t")
+        return Indent.getSpaceIndent(position.startOffset - beforeLineWithoutIndentStart)
     }
 
     private fun SemanticEditorPosition.isWhileInsideDoWhile(): Boolean {
@@ -139,7 +186,7 @@ abstract class KotlinLikeLangLineIndentProvider : JavaLikeLangLineIndentProvider
     private fun SemanticEditorPosition.isCatchKeyword(): Boolean = with(copy()) {
         // try-catch-*-catch
         do {
-            if (!isAt(KtTokens.IDENTIFIER)) return false
+            if (!isAt(Identifier)) return false
             if (!similarToCatchKeyword()) return false
 
             moveBeforeIgnoringWhiteSpaceOrComment()
@@ -154,7 +201,7 @@ abstract class KotlinLikeLangLineIndentProvider : JavaLikeLangLineIndentProvider
     }
 
     private fun SemanticEditorPosition.isFinallyKeyword(): Boolean {
-        if (!isAt(KtTokens.IDENTIFIER)) return false
+        if (!isAt(Identifier)) return false
         if (textOfCurrentPosition() != KtTokens.FINALLY_KEYWORD.value) return false
         with(copy()) {
             moveBeforeIgnoringWhiteSpaceOrComment()
@@ -172,12 +219,17 @@ abstract class KotlinLikeLangLineIndentProvider : JavaLikeLangLineIndentProvider
 
     private fun SemanticEditorPosition.moveBeforeBlockIfPossible(): Boolean = moveBeforeParenthesesIfPossible(
         leftParenthesis = BlockOpeningBrace,
-        rightParenthesis = BlockClosingBrace
+        rightParenthesis = BlockClosingBrace,
+    )
+
+    private fun SemanticEditorPosition.moveBeforeTypeListIfPossible(): Boolean = moveBeforeParenthesesIfPossible(
+        leftParenthesis = OpenTypeBrace,
+        rightParenthesis = CloseTypeBrace,
     )
 
     private fun SemanticEditorPosition.moveBeforeParenthesesIfPossible(): Boolean = moveBeforeParenthesesIfPossible(
         leftParenthesis = LeftParenthesis,
-        rightParenthesis = RightParenthesis
+        rightParenthesis = RightParenthesis,
     )
 
     private fun SemanticEditorPosition.moveBeforeParenthesesIfPossible(
@@ -206,6 +258,9 @@ abstract class KotlinLikeLangLineIndentProvider : JavaLikeLangLineIndentProvider
         WhileKeyword,
         RegularStringPart,
         KDoc,
+        Identifier,
+        OpenTypeBrace,
+        CloseTypeBrace,
     }
 
     companion object {
@@ -231,6 +286,9 @@ abstract class KotlinLikeLangLineIndentProvider : JavaLikeLangLineIndentProvider
             KtTokens.REGULAR_STRING_PART to RegularStringPart,
             KtTokens.LBRACKET to ArrayOpeningBracket,
             KtTokens.RBRACKET to ArrayClosingBracket,
+            KtTokens.IDENTIFIER to Identifier,
+            KtTokens.LT to OpenTypeBrace,
+            KtTokens.GT to CloseTypeBrace,
         )
 
         private val CONTROL_FLOW_KEYWORDS: HashSet<SemanticEditorPosition.SyntaxElement> = hashSetOf(
