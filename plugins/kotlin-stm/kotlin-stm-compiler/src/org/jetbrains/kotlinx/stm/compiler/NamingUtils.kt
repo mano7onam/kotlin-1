@@ -42,7 +42,7 @@ internal val ATOMIC_FUNCTION_ANNOTATION_NAME = Name.identifier("AtomicFunction")
 
 internal val ATOMIC_FUNCTION_ANNOTATION = FqName("$STM_PACKAGE.${ATOMIC_FUNCTION_ANNOTATION_NAME.identifier}")
 
-internal val TEMPORARY_IR_FUNCTION_ANNOTATION = FqName("$STM_PACKAGE.TemporaryIrFunction")
+internal val REPLACEABLE_ATOMIC_FUNCTION_ANNOTATION = FqName("$STM_PACKAGE.ReplaceableAtomicFunction")
 
 internal val STM_CONTEXT_CLASS = FqName("$STM_PACKAGE.${STM_CONTEXT.identifier}")
 

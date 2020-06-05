@@ -16,7 +16,7 @@ import java.io.File
 
 abstract class AbstractStmIrBytecodeListingTest : AbstractAsmLikeInstructionListingTest() {
     override fun getExpectedTextFileName(wholeFile: File): String {
-        return wholeFile.nameWithoutExtension + ".ir.txt"
+        return wholeFile.nameWithoutExtension + ".bc"
     }
 
     override fun updateConfiguration(configuration: CompilerConfiguration) {

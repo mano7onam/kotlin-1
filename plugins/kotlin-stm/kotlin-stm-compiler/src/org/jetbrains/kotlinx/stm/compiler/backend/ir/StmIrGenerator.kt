@@ -5,7 +5,6 @@
 
 package org.jetbrains.kotlinx.stm.compiler.backend.ir
 
-import org.jetbrains.kotlin.backend.common.BackendContext
 import org.jetbrains.kotlin.backend.common.deepCopyWithVariables
 import org.jetbrains.kotlin.backend.common.descriptors.synthesizedName
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
@@ -57,8 +56,6 @@ import kotlin.collections.set
 
 // Is creating synthetic origin is a good idea or not?
 object STM_PLUGIN_ORIGIN : IrDeclarationOriginImpl("STM")
-
-val BackendContext.externalSymbols: ReferenceSymbolTable get() = ir.symbols.externalSymbolTable
 
 private fun isStmContextType(type: IrType?) = type?.classOrNull?.isClassWithFqName(STM_CONTEXT_CLASS.toUnsafe())
     ?: false
@@ -132,6 +129,7 @@ open class StmIrGenerator {
             module: ModuleDescriptor,
             compilerContext: IrPluginContext
         ): IrFunctionSymbol {
+            // TODO: avoid using ModuleDescriptor when such an API is introduced in IR
             val methodBaseName = when {
                 module.platform.isJs() -> SEARCH_JS_STM_METHOD
                 module.platform.isJvm() -> SEARCH_JAVA_STM_METHOD
@@ -147,12 +145,11 @@ open class StmIrGenerator {
         }
 
         private fun getRunAtomicallyFunction(
-            module: ModuleDescriptor,
             compilerContext: IrPluginContext
         ): IrFunctionSymbol =
             compilerContext.referenceFunctions(STM_PACKAGE.child(RUN_ATOMICALLY_GLOBAL_FUNCTION))
                 .find { it.owner.valueParameters.size == 2 }
-                ?: throw StmLoweringException("Expected $RUN_ATOMICALLY_GLOBAL_FUNCTION to be visible in module ${module.name}")
+                ?: throw StmLoweringException("Expected $RUN_ATOMICALLY_GLOBAL_FUNCTION to be visible")
 
         private fun getSTMWrapMethod(context: IrPluginContext): IrFunctionSymbol =
             findMethodSymbolOrThrow(context, STM_INTERFACE, WRAP_METHOD)
@@ -304,13 +301,13 @@ open class StmIrGenerator {
                 newDescriptor.bind(this)
                 extensionReceiverParameter = oldFunction.extensionReceiverParameter
                 dispatchReceiverParameter = oldFunction.dispatchReceiverParameter
-                body = oldFunction.body?.deepCopyWithSymbols(initialParent = this)
                 valueParameters = oldFunction.valueParameters.map { it.copyTo(this) } + buildValueParameter {
                     type = findSTMContextTypeOrThrow(context)
                     index = oldFunction.valueParameters.size
                     name = "ctx".synthesizedName
                     parent = this@apply
                 }
+                body = oldFunction.body?.deepCopyWithSymbols(initialParent = this)
                 patchDeclarationParents(oldFunction.parent)
             }
 
@@ -442,7 +439,7 @@ open class StmIrGenerator {
             context: IrPluginContext
         ): IrCall {
             val irFunction = irFunctionSymbol.owner
-            val newFunction = getRunAtomicallyFunction(irFunction.module, context)
+            val newFunction = getRunAtomicallyFunction(context)
 
             val block = irCall.getValueArgument(0)?.deepCopyWithSymbolsAndParent()
 

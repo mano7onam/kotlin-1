@@ -138,6 +138,7 @@ open class StmResolveExtension : SyntheticResolveExtension {
         else -> listOf()
     }
 
+
     override fun generateSyntheticMethods(
         thisDescriptor: ClassDescriptor,
         name: Name,

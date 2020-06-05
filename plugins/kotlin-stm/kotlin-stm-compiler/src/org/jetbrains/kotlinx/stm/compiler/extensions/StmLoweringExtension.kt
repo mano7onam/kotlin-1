@@ -23,13 +23,13 @@ import org.jetbrains.kotlin.utils.addToStdlib.safeAs
 import org.jetbrains.kotlinx.stm.compiler.ATOMIC_FUNCTION_ANNOTATION
 import org.jetbrains.kotlinx.stm.compiler.RUN_ATOMICALLY_METHOD
 import org.jetbrains.kotlinx.stm.compiler.SHARED_MUTABLE_ANNOTATION
-import org.jetbrains.kotlinx.stm.compiler.TEMPORARY_IR_FUNCTION_ANNOTATION
+import org.jetbrains.kotlinx.stm.compiler.REPLACEABLE_ATOMIC_FUNCTION_ANNOTATION
 import org.jetbrains.kotlinx.stm.compiler.backend.ir.StmIrGenerator
 
 private fun IrFunction.isAtomicFunction() = this.annotations.hasAnnotation(ATOMIC_FUNCTION_ANNOTATION)
 private fun IrFunctionSymbol.isAtomicFunction() = this.owner.isAtomicFunction()
 
-private fun IrFunction.isRunAtomically() = this.annotations.hasAnnotation(TEMPORARY_IR_FUNCTION_ANNOTATION)
+private fun IrFunction.isRunAtomically() = this.annotations.hasAnnotation(REPLACEABLE_ATOMIC_FUNCTION_ANNOTATION)
         && this.name.asString() == RUN_ATOMICALLY_METHOD
 
 private fun IrClass.isSharedClass() = this.annotations.hasAnnotation(SHARED_MUTABLE_ANNOTATION)
