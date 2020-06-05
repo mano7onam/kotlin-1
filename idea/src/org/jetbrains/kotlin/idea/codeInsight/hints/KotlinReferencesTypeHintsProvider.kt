@@ -55,7 +55,7 @@ class KotlinReferencesTypeHintsProvider : KotlinAbstractHintsProvider<KotlinRefe
         }
     }
 
-    override fun createSettings(): Settings = Settings(false, false, false, false) //todo: check what initial value should be
+    override fun createSettings(): Settings = Settings()
 
     override fun isElementSupported(resolved: HintType?, settings: Settings): Boolean {
         return when (resolved) {

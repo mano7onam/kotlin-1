@@ -15,8 +15,8 @@ import javax.swing.JComponent
 class KotlinLambdasHintsProvider : KotlinAbstractHintsProvider<KotlinLambdasHintsProvider.Settings>() {
 
     data class Settings(
-        var returnExpressions: Boolean = false,
-        var implicitReceiversAndParams: Boolean = false,
+        var returnExpressions: Boolean = true,
+        var implicitReceiversAndParams: Boolean = true,
     )
 
     override val name: String = KotlinBundle.message("hints.settings.lambdas")
@@ -51,5 +51,5 @@ class KotlinLambdasHintsProvider : KotlinAbstractHintsProvider<KotlinLambdasHint
         }
     }
 
-    override fun createSettings(): Settings = Settings(returnExpressions = false, implicitReceiversAndParams = false) // todo: check state
+    override fun createSettings(): Settings = Settings()
 }

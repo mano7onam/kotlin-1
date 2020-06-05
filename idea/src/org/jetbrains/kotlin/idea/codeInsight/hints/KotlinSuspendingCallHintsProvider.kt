@@ -14,9 +14,7 @@ import javax.swing.JComponent
 @Suppress("UnstableApiUsage")
 class KotlinSuspendingCallHintsProvider : KotlinAbstractHintsProvider<KotlinSuspendingCallHintsProvider.Settings>() {
 
-    data class Settings(
-        var suspendingCalls: Boolean = false
-    )
+    data class Settings(var suspendingCalls: Boolean = false)
 
     override val name: String = KotlinBundle.message("hints.settings.suspending")
 
@@ -37,7 +35,7 @@ class KotlinSuspendingCallHintsProvider : KotlinAbstractHintsProvider<KotlinSusp
         }
     }
 
-    override fun createSettings(): Settings = Settings(suspendingCalls = false) // todo: check state
+    override fun createSettings(): Settings = Settings()
 
     override fun isElementSupported(resolved: HintType?, settings: Settings): Boolean {
         return when (resolved) {
