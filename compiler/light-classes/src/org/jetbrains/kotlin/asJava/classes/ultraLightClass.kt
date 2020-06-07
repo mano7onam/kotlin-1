@@ -40,6 +40,7 @@ import org.jetbrains.kotlin.resolve.jvm.annotations.JVM_OVERLOADS_FQ_NAME
 import org.jetbrains.kotlin.types.KotlinType
 import org.jetbrains.kotlin.types.typeUtil.isAnyOrNullableAny
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentMap
 
 open class KtUltraLightClass(classOrObject: KtClassOrObject, internal val support: KtUltraLightSupport) :
     KtLightClassImpl(classOrObject) {
@@ -503,6 +504,12 @@ open class KtUltraLightClass(classOrObject: KtClassOrObject, internal val suppor
             }
             result
         }
+}
+
+public inline fun <K, V> ConcurrentMap<K, V>.getOrPut(key: K, defaultValue: () -> V): V {
+    // Do not use computeIfAbsent on JVM8 as it would change locking behavior
+    return this.get(key)
+        ?: defaultValue().let { default -> default?.let { this.putIfAbsent(key, default) } ?: default }
 }
 
 /**

@@ -311,8 +311,11 @@ private fun packMethodFlags(access: Int, isInterface: Boolean): Int {
 }
 
 internal fun KtModifierListOwner.isHiddenByDeprecation(support: KtUltraLightSupport): Boolean {
-    val jetModifierList = this.modifierList ?: return false
-    if (jetModifierList.annotationEntries.isEmpty()) return false
+    if (annotationEntries.isEmpty()) return false
+    for (annotation in annotationEntries) {
+        if (annotation.text != null)
+            true
+    }
 
     val deprecated = support.findAnnotation(this, KotlinBuiltIns.FQ_NAMES.deprecated)?.second
     return (deprecated?.argumentValue("level") as? EnumValue)?.enumEntryName?.asString() == "HIDDEN"
